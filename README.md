@@ -19,8 +19,7 @@
 
 ### 多模態支援
 - **圖片上傳** 📷 - 支援視覺模型（如 qwen3-vl）分析圖片
-- **語音輸入** 🎤 - 瀏覽器即時語音轉文字
-- **音檔轉錄** 📁 - 上傳音檔自動轉為文字
+- **語音輸入** 🎤 - 瀏覽器即時語音轉文字（Web Speech API）
 
 ### 訊息編輯
 - 編輯最後一則訊息並重新發送
@@ -113,9 +112,7 @@ npm run dev
 | 方法 | 端點 | 說明 |
 |------|------|------|
 | GET | `/api/models` | 取得可用模型列表 |
-| POST | `/api/chat` | 發送聊天訊息（支援圖片） |
-| POST | `/api/transcribe` | 音檔轉文字 |
-| GET | `/api/audio-models` | 檢查音訊模型是否可用 |
+| POST | `/api/chat` | 發送聊天訊息（支援圖片多模態） |
 
 ### 聊天 API 請求範例
 
@@ -133,13 +130,6 @@ npm run dev
 }
 ```
 
-### 音檔轉錄
-
-```bash
-curl -X POST http://localhost:3001/api/transcribe \
-  -F "audio=@recording.mp3"
-```
-
 ## 生產環境部署
 
 ```bash
@@ -155,27 +145,22 @@ npm start
 
 ## 多模態功能說明
 
-### 圖片上傳
+### 圖片上傳 📷
 點擊輸入框旁的 📷 按鈕上傳圖片，支援的視覺模型包括：
-- `qwen3-vl` - Qwen 視覺語言模型
+- `qwen3-vl` - Qwen 視覺語言模型（**僅支援圖片和影片，不支援音訊**）
 - `llava` - LLaVA 視覺模型
 - 其他支援圖片的多模態模型
 
-### 語音輸入
+### 語音輸入 🎤
 點擊 🎤 按鈕開始即時語音輸入（使用瀏覽器 Web Speech API）：
 - 支援 Chrome、Edge、Safari 等現代瀏覽器
 - 預設識別繁體中文
 - 無需安裝額外模型
+- 語音會即時轉為文字顯示在輸入框
 
-### 音檔轉錄
-點擊 📁 按鈕上傳音檔轉文字：
-- 支援 MP3、WAV、M4A 等常見格式
-- 需要安裝音訊模型：`ollama pull whisper`
-- 最大檔案大小：25MB
-
-> **注意**：Ollama 目前不直接支援音訊多模態輸入（[Issue #6367](https://github.com/ollama/ollama/issues/6367)），
-> 本專案採用與 [Open WebUI](https://github.com/open-webui/open-webui) 相同的策略，
-> 先使用 STT 服務將音訊轉為文字再發送給 LLM。
+> **關於音訊支援**：Ollama 目前**不支援**音訊多模態輸入（[Issue #6367](https://github.com/ollama/ollama/issues/6367)）。
+> `qwen3-vl` 是視覺語言模型，支援文字、圖片、影片，但**不支援音訊**。
+> 如需語音輸入，請使用 🎤 按鈕的即時語音功能（瀏覽器 Web Speech API）。
 
 ## 授權
 

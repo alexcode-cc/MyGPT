@@ -22,9 +22,8 @@ App.vue
     ├── 標題列（模型選擇下拉選單）
     ├── 訊息區域（含圖片預覽、編輯按鈕）
     └── 輸入區域
-        ├── 圖片上傳按鈕 📷
-        ├── 語音輸入按鈕 🎤
-        ├── 音檔上傳按鈕 📁
+        ├── 圖片上傳按鈕 📷（支援視覺模型）
+        ├── 語音輸入按鈕 🎤（Web Speech API）
         ├── 文字輸入框
         └── 發送按鈕
 ```
@@ -60,14 +59,13 @@ const uploadedImages = ref<UploadedImage[]>([]); // 待上傳的圖片
 const isEditingMessage = ref(false);           // 是否正在編輯訊息
 const editingImages = ref<string[]>([]);       // 編輯中保留的圖片
 
-// 語音輸入
+// 語音輸入（Web Speech API）
 const isRecording = ref(false);                // 是否正在錄音
 const speechRecognition = ref<any>(null);      // 語音識別實例
 const speechSupported = ref(false);            // 瀏覽器是否支援
-
-// 音檔轉錄
-const isTranscribing = ref(false);             // 是否正在轉錄
 ```
+
+> **注意**：Ollama 目前不支援音訊多模態輸入，語音輸入功能使用瀏覽器的 Web Speech API 實現。
 
 ## 訊息介面定義
 
@@ -313,39 +311,7 @@ function toggleSpeechRecognition() {
 }
 ```
 
-### 8. 音檔上傳轉錄
-
-```typescript
-async function handleAudioUpload(event: Event) {
-  const input = event.target as HTMLInputElement;
-  if (!input.files || input.files.length === 0) return;
-  
-  const file = input.files[0];
-  isTranscribing.value = true;
-  
-  try {
-    const formData = new FormData();
-    formData.append('audio', file);
-    
-    const response = await fetch(`${API_BASE}/transcribe`, {
-      method: 'POST',
-      body: formData
-    });
-    
-    const data = await response.json();
-    
-    if (data.text) {
-      userInput.value += data.text;
-    }
-  } catch (error) {
-    alert('音檔轉錄失敗');
-  } finally {
-    isTranscribing.value = false;
-  }
-}
-```
-
-### 9. 編輯並重新發送訊息
+### 8. 編輯並重新發送訊息
 
 ```typescript
 function editLastMessage() {

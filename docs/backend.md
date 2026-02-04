@@ -5,8 +5,6 @@
 - **Express.js** - Web 框架
 - **Axios** - HTTP 客戶端（用於與 Ollama 通訊）
 - **CORS** - 跨域資源共享中間件
-- **Multer** - 檔案上傳處理
-- **form-data** - FormData 處理
 
 ## 伺服器設定
 
@@ -14,22 +12,12 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
-const FormData = require('form-data');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // 支援大型圖片
 
 const OLLAMA_API = 'http://localhost:11434/api';
-
-// 檔案上傳設定
-const upload = multer({ 
-  dest: '/tmp/uploads/',
-  limits: { fileSize: 25 * 1024 * 1024 } // 25MB
-});
 
 const PORT = 3001;
 const HOST = '0.0.0.0';
@@ -213,84 +201,6 @@ app.use(express.json());
 
 自動解析請求 body 中的 JSON 資料。
 
-## 3. 音檔轉錄 API (POST /api/transcribe)
-
-處理音檔上傳並使用 Ollama 的語音模型進行轉錄。
-
-```javascript
-app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: '未提供音訊檔案' });
-  }
-
-  const filePath = req.file.path;
-  const whisperModel = req.body.model || 'whisper';
-
-  try {
-    // 讀取音訊檔案並轉為 base64
-    const audioBuffer = fs.readFileSync(filePath);
-    const audioBase64 = audioBuffer.toString('base64');
-
-    // 嘗試使用 whisper 模型
-    const response = await axios.post(`${OLLAMA_API}/generate`, {
-      model: whisperModel,
-      prompt: '請將這段音訊轉錄為文字。',
-      images: [audioBase64],
-      stream: false
-    }, { timeout: 120000 });
-
-    fs.unlinkSync(filePath); // 清理暫存檔案
-    res.json({ text: response.data.response || '' });
-  } catch (error) {
-    // 如果 whisper 不可用，嘗試 qwen2-audio
-    // ...
-  }
-});
-```
-
-### 音訊轉錄說明
-
-由於 Ollama 目前不直接支援音訊多模態輸入（[Issue #6367](https://github.com/ollama/ollama/issues/6367)），
-本專案採用與 [Open WebUI](https://github.com/open-webui/open-webui) 相同的策略：
-
-1. 使用者上傳音檔
-2. 後端使用 STT 模型（如 whisper、qwen2-audio）將音訊轉為文字
-3. 將轉換後的文字返回前端
-
-### 支援的音訊模型
-
-| 模型 | 安裝指令 | 說明 |
-|------|----------|------|
-| whisper | `ollama pull whisper` | OpenAI Whisper 語音識別 |
-| qwen2-audio | `ollama pull qwen2-audio` | Qwen 音訊模型 |
-
-## 4. 音訊模型檢查 API (GET /api/audio-models)
-
-檢查本地 Ollama 是否安裝了音訊模型。
-
-```javascript
-app.get('/api/audio-models', async (req, res) => {
-  try {
-    const response = await axios.get(`${OLLAMA_API}/tags`);
-    const models = response.data.models || [];
-    
-    const audioModels = models.filter(m => {
-      const name = m.name.toLowerCase();
-      return name.includes('whisper') || 
-             name.includes('audio') ||
-             name.includes('qwen2-audio');
-    });
-    
-    res.json({ 
-      available: audioModels.length > 0,
-      models: audioModels.map(m => m.name)
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-```
-
 ## 相依套件
 
 ```json
@@ -298,9 +208,17 @@ app.get('/api/audio-models', async (req, res) => {
   "dependencies": {
     "axios": "^1.6.7",
     "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "form-data": "^4.0.0",
-    "multer": "^1.4.5-lts.1"
+    "express": "^4.18.2"
   }
 }
 ```
+
+## 關於音訊支援
+
+> **注意**：Ollama 目前**不支援**音訊多模態輸入。
+> 
+> - `whisper` 和 `qwen2-audio` **不存在**於 Ollama 模型庫中
+> - `qwen3-vl` 是視覺語言模型，支援文字、圖片、影片，但**不支援音訊**
+> - 如需語音輸入功能，前端使用瀏覽器的 Web Speech API
+> 
+> 相關 Issue：[ollama/ollama#6367](https://github.com/ollama/ollama/issues/6367)
