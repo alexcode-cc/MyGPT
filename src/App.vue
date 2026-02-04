@@ -255,6 +255,12 @@
           <span>正在聆聽... 說完後點擊麥克風停止</span>
         </div>
         
+        <!-- 音檔轉錄狀態 -->
+        <div v-if="isTranscribing" class="transcribing-indicator">
+          <span class="transcribing-spinner">🔄</span>
+          <span>正在轉錄音檔... 請稍候</span>
+        </div>
+        
         <div class="input-row">
           <!-- 上傳圖片按鈕 -->
           <input
@@ -283,6 +289,24 @@
             :title="speechSupported ? (isRecording ? '停止語音輸入' : '語音輸入（點擊開始說話）') : '您的瀏覽器不支援語音輸入'"
           >
             {{ isRecording ? '🔴' : '🎤' }}
+          </button>
+          
+          <!-- 上傳音檔按鈕 -->
+          <input
+            type="file"
+            ref="audioInput"
+            accept="audio/*"
+            @change="handleAudioUpload"
+            style="display: none"
+          />
+          <button 
+            class="upload-btn"
+            :class="{ 'transcribing': isTranscribing }"
+            @click="triggerAudioUpload"
+            :disabled="isTyping || isTranscribing"
+            title="上傳音檔轉文字（支援 MP3、WAV 等格式）"
+          >
+            {{ isTranscribing ? '⏳' : '📁' }}
           </button>
           
           <textarea
@@ -407,6 +431,10 @@ const editingImages = ref<string[]>([]); // 編輯時保留的原有圖片（bas
 const isRecording = ref(false);
 const speechRecognition = ref<any>(null);
 const speechSupported = ref(false);
+
+// 音檔轉錄狀態
+const isTranscribing = ref(false);
+const audioInput = ref<HTMLInputElement>();
 
 // 預設提示詞範本
 const promptTemplates = [
@@ -652,6 +680,79 @@ function toggleSpeechRecognition() {
       console.error('無法啟動語音識別:', e);
       alert('無法啟動語音識別，請檢查麥克風權限');
     }
+  }
+}
+
+// ========== 音檔上傳轉錄 ==========
+
+function triggerAudioUpload() {
+  audioInput.value?.click();
+}
+
+async function handleAudioUpload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (!input.files || input.files.length === 0) return;
+  
+  const file = input.files[0];
+  
+  // 檢查是否為音檔
+  if (!file.type.startsWith('audio/')) {
+    alert('請選擇音訊檔案');
+    input.value = '';
+    return;
+  }
+  
+  // 檢查檔案大小 (25MB)
+  if (file.size > 25 * 1024 * 1024) {
+    alert('音檔大小不能超過 25MB');
+    input.value = '';
+    return;
+  }
+  
+  isTranscribing.value = true;
+  
+  try {
+    const formData = new FormData();
+    formData.append('audio', file);
+    
+    const response = await fetch(`${API_BASE}/transcribe`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || errorData.error || '轉錄失敗');
+    }
+    
+    const data = await response.json();
+    
+    if (data.text) {
+      // 將轉錄結果加入輸入框
+      if (userInput.value) {
+        userInput.value += '\n' + data.text;
+      } else {
+        userInput.value = data.text;
+      }
+      
+      // 聚焦輸入框
+      nextTick(() => {
+        messageInput.value?.focus();
+      });
+    } else {
+      alert('未能識別音訊內容');
+    }
+  } catch (error: any) {
+    console.error('音檔轉錄失敗:', error);
+    
+    if (error.message.includes('音訊轉錄服務不可用')) {
+      alert('音訊轉錄服務不可用\n\n本地 Ollama 未安裝支援音訊的模型（如 whisper 或 qwen2-audio）\n\n建議使用麥克風圖示的即時語音輸入功能，或安裝音訊模型：\nollama pull whisper');
+    } else {
+      alert(`音檔轉錄失敗: ${error.message}`);
+    }
+  } finally {
+    isTranscribing.value = false;
+    input.value = '';
   }
 }
 
@@ -1930,6 +2031,35 @@ function clearAllData() {
 @keyframes recording-btn-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.4); }
   50% { box-shadow: 0 0 0 8px rgba(255, 107, 107, 0); }
+}
+
+/* 音檔轉錄狀態 */
+.transcribing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #e7f5ff;
+  border: 1px solid #74c0fc;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #1971c2;
+}
+
+.transcribing-spinner {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.upload-btn.transcribing {
+  background: #e7f5ff;
+  border: 2px solid #74c0fc;
+  cursor: wait;
 }
 
 .input-row {
