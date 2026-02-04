@@ -26,6 +26,9 @@
 - 編輯最後一則訊息並重新發送
 - 編輯時保留原有圖片
 
+### 便利功能
+- 一鍵複製 AI 回覆訊息（📋 按鈕）
+
 ## 系統需求
 
 - Node.js 18+
@@ -186,7 +189,8 @@ npm start
 ### 音檔轉錄 📁
 點擊 📁 按鈕上傳音檔，使用 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) 進行高品質轉錄：
 - 支援 MP3、WAV、M4A、FLAC、OGG 等格式
-- 自動偵測語言
+- 自動偵測多語言（如英語 + 日語混合）
+- 轉錄結果會附帶描述性提示（檔名、時長、語言），方便 AI 理解
 - 需要啟動 whisper-server 服務（見下方說明）
 
 **啟動 Whisper 服務：**

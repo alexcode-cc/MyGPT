@@ -93,6 +93,8 @@ app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
       formData.append('language', language);
     }
     formData.append('task', 'transcribe');
+    // 預設關閉 VAD，避免音樂歌詞被過濾
+    formData.append('vad_filter', req.body.vad_filter || 'false');
 
     console.log(`轉發音檔到 Whisper 服務: ${originalName}`);
     

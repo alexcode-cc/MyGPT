@@ -20,7 +20,7 @@ App.vue
 │   └── 快速範本
 └── 主聊天區域 (Chat Container)
     ├── 標題列（模型選擇下拉選單）
-    ├── 訊息區域（含圖片預覽、編輯按鈕）
+    ├── 訊息區域（含圖片預覽、編輯按鈕、複製按鈕）
     └── 輸入區域
         ├── 圖片上傳按鈕 📷（支援視覺模型）
         ├── 語音輸入按鈕 🎤（Web Speech API）
@@ -337,9 +337,16 @@ async function handleAudioUpload(event: Event) {
     const data = await response.json();
     
     if (data.text) {
-      // 將轉錄結果加入輸入框
-      userInput.value += data.text;
-      console.log(`轉錄完成: 語言=${data.language}, 時長=${data.duration}秒`);
+      // 格式化轉錄結果，加入描述性提示
+      const formattedTranscription = formatAudioTranscription(
+        file.name,
+        data.text,
+        data.language,
+        data.duration,
+        data.segments,
+        data.languages  // 多語言支援
+      );
+      userInput.value = formattedTranscription;
     }
   } catch (error) {
     if (error.message.includes('Whisper 服務未啟動')) {
@@ -351,7 +358,88 @@ async function handleAudioUpload(event: Event) {
 }
 ```
 
-### 9. 編輯並重新發送訊息
+### 9. 音檔轉錄格式化
+
+將轉錄結果加上描述性提示，讓 AI 理解音檔來源：
+
+```typescript
+function formatAudioTranscription(
+  filename: string,
+  text: string,
+  language: string,
+  duration: number,
+  segments?: Array<{ start: number; end: number; text: string }>,
+  languages?: string[]  // 多語言支援
+): string {
+  // 語言代碼對應名稱
+  const languageNames: Record<string, string> = {
+    'zh': '中文', 'en': '英語', 'ja': '日語', 'ko': '韓語', ...
+  };
+  
+  // 處理多語言顯示
+  let langDisplay: string;
+  if (languages && languages.length > 0) {
+    const langNames = languages.map(code => languageNames[code] || code);
+    langDisplay = langNames.join(' + ');
+  } else {
+    langDisplay = languageNames[language] || language;
+  }
+  
+  // 建構描述性的提示文字
+  let result = `[音檔轉錄內容]\n`;
+  result += `檔案名稱：${filename}\n`;
+  result += `時長：${formatDuration(duration)}\n`;
+  result += `語言：${langDisplay}\n`;
+  result += `---\n`;
+  result += text;
+  
+  return result;
+}
+```
+
+輸出範例：
+```
+[音檔轉錄內容]
+檔案名稱：test.mp3
+時長：35秒
+語言：英語 + 日語
+---
+You are always going to be my love いつか誰かとまた恋に...
+```
+
+### 10. 複製訊息功能
+
+```typescript
+async function copyMessageContent(content: string) {
+  try {
+    await navigator.clipboard.writeText(content);
+    showToast('已複製到剪貼簿');
+  } catch (error) {
+    // 備用方案：使用傳統方法
+    const textArea = document.createElement('textarea');
+    textArea.value = content;
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+    showToast('已複製到剪貼簿');
+  }
+}
+
+function showToast(message: string, duration: number = 2000) {
+  const toast = document.createElement('div');
+  toast.className = 'copy-toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.classList.add('fade-out');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+```
+
+### 11. 編輯並重新發送訊息
 
 ```typescript
 function editLastMessage() {

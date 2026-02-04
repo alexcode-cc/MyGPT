@@ -325,9 +325,61 @@ app.get('/api/whisper/health', async (req, res) => {
 | large-v3 | 1550M | ~10GB |
 | turbo | 809M | ~6GB |
 
+### 多語言偵測
+
+服務會分析轉錄文字中的 Unicode 字符，自動偵測包含的所有語言：
+
+```python
+def detect_languages_in_text(text: str) -> List[str]:
+    """
+    分析文字中包含的語言
+    基於 Unicode 字符範圍判斷
+    """
+    languages = set()
+    
+    for char in text:
+        name = unicodedata.name(char, '')
+        
+        if 'HIRAGANA' in name or 'KATAKANA' in name:
+            languages.add('ja')
+        elif 'CJK' in name:
+            if 'ja' not in languages:
+                languages.add('zh')
+        elif 'HANGUL' in name:
+            languages.add('ko')
+        elif 'LATIN' in name:
+            languages.add('en')
+        # ... 其他語言
+    
+    return sorted(list(languages))
+```
+
+### 音樂/歌曲轉錄優化
+
+預設關閉 VAD（Voice Activity Detection）以避免歌聲被過濾：
+
+```python
+segments, info = model.transcribe(
+    audio_path,
+    vad_filter=False,  # 對音樂關閉 VAD
+    condition_on_previous_text=True,  # 使用上下文
+    max_initial_timestamp=2.0,  # 允許更長的初始時間戳
+)
+```
+
 ### 啟動服務
 
 ```bash
 cd whisper-server
 ./start.sh
+```
+
+首次啟動會自動下載模型（large-v3 約 3GB）。
+
+### CUDA 設定
+
+如果遇到 `libcublas.so.12 not found` 錯誤，`start.sh` 會自動設定：
+
+```bash
+export LD_LIBRARY_PATH="/usr/local/lib/ollama/cuda_v12:${LD_LIBRARY_PATH:-}"
 ```

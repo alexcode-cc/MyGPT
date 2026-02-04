@@ -192,6 +192,15 @@
               >
                 ✏️
               </button>
+              <!-- 複製按鈕：顯示在 AI 回覆訊息上 -->
+              <button 
+                v-if="msg.role === 'assistant'"
+                class="copy-message-btn"
+                @click="copyMessageContent(msg.content)"
+                title="複製訊息內容"
+              >
+                📋
+              </button>
             </div>
             <!-- 顯示附加的圖片 -->
             <div v-if="msg.images && msg.images.length > 0" class="message-images">
@@ -730,11 +739,21 @@ async function handleAudioUpload(event: Event) {
     const data = await response.json();
     
     if (data.text) {
-      // 將轉錄結果加入輸入框
+      // 格式化音檔轉錄結果，加入描述性提示文字
+      const formattedTranscription = formatAudioTranscription(
+        file.name,
+        data.text,
+        data.language,
+        data.duration,
+        data.segments,
+        data.languages  // 多語言支援
+      );
+      
+      // 將格式化的結果加入輸入框
       if (userInput.value) {
-        userInput.value += '\n' + data.text;
+        userInput.value += '\n\n' + formattedTranscription;
       } else {
-        userInput.value = data.text;
+        userInput.value = formattedTranscription;
       }
       
       // 顯示轉錄資訊
@@ -759,6 +778,66 @@ async function handleAudioUpload(event: Event) {
     isTranscribing.value = false;
     input.value = '';
   }
+}
+
+// 格式化音檔轉錄結果
+function formatAudioTranscription(
+  filename: string,
+  text: string,
+  language: string,
+  duration: number,
+  segments?: Array<{ start: number; end: number; text: string }>,
+  languages?: string[]  // 多語言支援
+): string {
+  // 語言代碼對應名稱
+  const languageNames: Record<string, string> = {
+    'zh': '中文',
+    'en': '英語',
+    'ja': '日語',
+    'ko': '韓語',
+    'fr': '法語',
+    'de': '德語',
+    'es': '西班牙語',
+    'it': '義大利語',
+    'pt': '葡萄牙語',
+    'ru': '俄語',
+    'ar': '阿拉伯語',
+    'th': '泰語',
+    'vi': '越南語',
+  };
+  
+  // 處理多語言顯示
+  let langDisplay: string;
+  if (languages && languages.length > 0) {
+    // 使用文字分析出的多語言
+    const langNames = languages.map(code => languageNames[code] || code);
+    langDisplay = langNames.join(' + ');
+  } else {
+    // 使用 Whisper 偵測的單一語言
+    langDisplay = languageNames[language] || language;
+  }
+  
+  const durationStr = formatDuration(duration);
+  
+  // 建構描述性的提示文字
+  let result = `[音檔轉錄內容]\n`;
+  result += `檔案名稱：${filename}\n`;
+  result += `時長：${durationStr}\n`;
+  result += `語言：${langDisplay}\n`;
+  result += `---\n`;
+  result += text;
+  
+  return result;
+}
+
+// 格式化時長
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  if (mins > 0) {
+    return `${mins}分${secs}秒`;
+  }
+  return `${secs}秒`;
 }
 
 // 檢查 Whisper 服務狀態
@@ -1321,6 +1400,57 @@ function clearAllData() {
   localStorage.removeItem('systemPrompt');
   
   alert('所有資料已清除！');
+}
+
+// ========== 複製訊息 ==========
+
+async function copyMessageContent(content: string) {
+  try {
+    await navigator.clipboard.writeText(content);
+    
+    // 顯示成功提示（使用簡單的 toast 效果）
+    showToast('已複製到剪貼簿');
+  } catch (error) {
+    console.error('複製失敗:', error);
+    
+    // 備用方案：使用傳統方法
+    const textArea = document.createElement('textarea');
+    textArea.value = content;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.select();
+    
+    try {
+      document.execCommand('copy');
+      showToast('已複製到剪貼簿');
+    } catch (e) {
+      alert('複製失敗，請手動選取文字複製');
+    }
+    
+    document.body.removeChild(textArea);
+  }
+}
+
+// 顯示 Toast 提示
+function showToast(message: string, duration: number = 2000) {
+  // 移除現有的 toast
+  const existingToast = document.querySelector('.copy-toast');
+  if (existingToast) {
+    existingToast.remove();
+  }
+  
+  // 建立新的 toast
+  const toast = document.createElement('div');
+  toast.className = 'copy-toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  
+  // 自動移除
+  setTimeout(() => {
+    toast.classList.add('fade-out');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
 }
 </script>
 
@@ -1905,6 +2035,28 @@ function clearAllData() {
   background: rgba(255, 255, 255, 0.2);
 }
 
+/* 複製訊息按鈕 */
+.copy-message-btn {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.85rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.2s;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.message:hover .copy-message-btn {
+  opacity: 0.6;
+}
+
+.copy-message-btn:hover {
+  opacity: 1 !important;
+  background: rgba(0, 0, 0, 0.1);
+}
+
 .typing-indicator {
   font-size: 0.8rem;
   color: #999;
@@ -2277,6 +2429,51 @@ function clearAllData() {
   .header h1 {
     max-width: 200px;
     font-size: 1.1rem;
+  }
+}
+</style>
+
+<!-- 全域樣式（非 scoped，用於動態建立的元素） -->
+<style>
+/* Toast 提示樣式 */
+.copy-toast {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  z-index: 10000;
+  animation: toast-in 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.copy-toast.fade-out {
+  animation: toast-out 0.3s ease forwards;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-20px);
   }
 }
 </style>
