@@ -129,7 +129,27 @@
       <div class="header">
         <h1>{{ currentConversation?.title || '本地 AI 助手' }}</h1>
         <div class="header-info">
-          <span class="model-badge" v-if="selectedModel">{{ selectedModel }}</span>
+          <!-- 模型選擇下拉選單 -->
+          <div class="model-selector" v-if="selectedModel">
+            <button 
+              class="model-badge clickable" 
+              @click="toggleModelDropdown"
+              :title="'點擊變更模型'"
+            >
+              {{ selectedModel }}
+              <span class="dropdown-arrow">▼</span>
+            </button>
+            <div v-if="showModelDropdown" class="model-dropdown">
+              <div 
+                v-for="model in models" 
+                :key="model.name"
+                :class="['model-option', { active: model.name === selectedModel }]"
+                @click="selectModel(model.name)"
+              >
+                {{ model.name }}
+              </div>
+            </div>
+          </div>
           <span class="system-prompt-indicator" v-if="systemPrompt" title="系統提示詞已啟用">
             📝 系統提示詞已設定
           </span>
@@ -138,6 +158,8 @@
           </span>
         </div>
       </div>
+      <!-- 點擊外部關閉下拉選單 -->
+      <div v-if="showModelDropdown" class="dropdown-backdrop" @click="showModelDropdown = false"></div>
 
       <div class="messages" ref="messagesContainer">
         <!-- 歡迎訊息 -->
@@ -239,6 +261,9 @@ const editingConversation = ref<Conversation | null>(null);
 const editingTitle = ref('');
 const editTitleInput = ref<HTMLInputElement>();
 
+// 模型下拉選單狀態
+const showModelDropdown = ref(false);
+
 // 預設提示詞範本
 const promptTemplates = [
   { name: '繁體中文', prompt: '請總是使用繁體中文回應所有訊息。' },
@@ -339,6 +364,24 @@ async function loadModels() {
     }
   } catch (error) {
     console.error('載入模型失敗:', error);
+  }
+}
+
+// ========== 模型選擇 ==========
+
+function toggleModelDropdown() {
+  showModelDropdown.value = !showModelDropdown.value;
+}
+
+function selectModel(modelName: string) {
+  selectedModel.value = modelName;
+  showModelDropdown.value = false;
+  
+  // 更新當前對話的模型
+  if (currentConversation.value) {
+    currentConversation.value.model = modelName;
+    currentConversation.value.updatedAt = Date.now();
+    saveConversations();
   }
 }
 
@@ -967,12 +1010,88 @@ function clearAllData() {
   flex-shrink: 0;
 }
 
+/* 模型選擇器 */
+.model-selector {
+  position: relative;
+}
+
 .model-badge {
   background: #e9ecef;
   padding: 0.3rem 0.8rem;
   border-radius: 20px;
   font-size: 0.8rem;
   color: #495057;
+  border: none;
+}
+
+.model-badge.clickable {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: all 0.2s;
+}
+
+.model-badge.clickable:hover {
+  background: #007bff;
+  color: white;
+}
+
+.dropdown-arrow {
+  font-size: 0.6rem;
+  transition: transform 0.2s;
+}
+
+.model-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.5rem;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  min-width: 200px;
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 1001;
+}
+
+.model-option {
+  padding: 0.6rem 1rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-option:hover {
+  background: #f0f0f0;
+}
+
+.model-option.active {
+  background: #e3f2fd;
+  color: #007bff;
+  font-weight: 500;
+}
+
+.model-option:first-child {
+  border-radius: 8px 8px 0 0;
+}
+
+.model-option:last-child {
+  border-radius: 0 0 8px 8px;
+}
+
+.dropdown-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
 }
 
 .system-prompt-indicator {
