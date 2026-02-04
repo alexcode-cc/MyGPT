@@ -183,6 +183,15 @@
             <div class="message-header">
               <span class="role-label">{{ msg.role === 'user' ? '你' : 'AI' }}</span>
               <span class="message-time" v-if="msg.timestamp">{{ formatTime(msg.timestamp) }}</span>
+              <!-- 編輯按鈕：只顯示在最後一組對話的使用者訊息上 -->
+              <button 
+                v-if="msg.role === 'user' && canEditMessage(idx)"
+                class="edit-message-btn"
+                @click="editLastMessage"
+                title="編輯並重新發送"
+              >
+                ✏️
+              </button>
             </div>
             <!-- 顯示附加的圖片 -->
             <div v-if="msg.images && msg.images.length > 0" class="message-images">
@@ -212,11 +221,27 @@
       </div>
 
       <div class="input-area">
+        <!-- 編輯模式提示 -->
+        <div v-if="isEditingMessage" class="editing-indicator">
+          <span>✏️ 編輯訊息中</span>
+          <button class="cancel-edit-btn" @click="cancelEditMessage">取消編輯</button>
+        </div>
+
         <!-- 圖片預覽區 -->
-        <div v-if="uploadedImages.length > 0" class="uploaded-images-preview">
+        <div v-if="uploadedImages.length > 0 || editingImages.length > 0" class="uploaded-images-preview">
+          <!-- 編輯模式下的原有圖片 -->
+          <div 
+            v-for="(img, idx) in editingImages" 
+            :key="'edit-' + idx" 
+            class="uploaded-image-item editing"
+          >
+            <img :src="'data:image/jpeg;base64,' + img" alt="原有圖片" />
+            <button class="remove-image-btn" @click="removeEditingImage(idx)">✕</button>
+          </div>
+          <!-- 新上傳的圖片 -->
           <div 
             v-for="(img, idx) in uploadedImages" 
-            :key="idx" 
+            :key="'new-' + idx" 
             class="uploaded-image-item"
           >
             <img :src="img.preview" alt="預覽" />
@@ -244,17 +269,20 @@
           </button>
           
           <textarea
+            ref="messageInput"
             v-model="userInput"
             @keydown.enter.exact.prevent="sendMessage"
+            @keydown.escape="cancelEditMessage"
             @paste="handlePaste"
-            placeholder="輸入訊息... (Enter 發送, Shift+Enter 換行，可貼上或拖放圖片)"
+            :placeholder="isEditingMessage ? '編輯訊息後按 Enter 重新發送，Esc 取消' : '輸入訊息... (Enter 發送, Shift+Enter 換行，可貼上或拖放圖片)'"
             :disabled="isTyping"
           />
           <button 
             @click="sendMessage" 
-            :disabled="isTyping || (!userInput.trim() && uploadedImages.length === 0)"
+            :disabled="isTyping || (!userInput.trim() && uploadedImages.length === 0 && editingImages.length === 0)"
+            :class="{ 'resend-btn': isEditingMessage }"
           >
-            發送
+            {{ isEditingMessage ? '重新發送' : '發送' }}
           </button>
         </div>
       </div>
@@ -328,6 +356,11 @@ const showModelDropdown = ref(false);
 const uploadedImages = ref<UploadedImage[]>([]);
 const fileInput = ref<HTMLInputElement>();
 const previewImageUrl = ref<string | null>(null);
+const messageInput = ref<HTMLTextAreaElement>();
+
+// 編輯訊息狀態
+const isEditingMessage = ref(false);
+const editingImages = ref<string[]>([]); // 編輯時保留的原有圖片（base64）
 
 // 預設提示詞範本
 const promptTemplates = [
@@ -499,6 +532,84 @@ function previewImage(url: string) {
   previewImageUrl.value = url;
 }
 
+function removeEditingImage(index: number) {
+  editingImages.value.splice(index, 1);
+}
+
+// ========== 編輯訊息功能 ==========
+
+// 判斷訊息是否可以編輯（只有最後一組對話的使用者訊息可以編輯）
+function canEditMessage(idx: number): boolean {
+  if (isTyping.value || isEditingMessage.value) return false;
+  
+  const msgs = messages.value;
+  if (msgs.length === 0) return false;
+  
+  // 找到最後一個使用者訊息的索引
+  let lastUserIdx = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'user') {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  
+  return idx === lastUserIdx;
+}
+
+// 開始編輯最後一則訊息
+function editLastMessage() {
+  const conv = currentConversation.value;
+  if (!conv || conv.messages.length === 0) return;
+  
+  // 找到最後一個使用者訊息
+  let lastUserIdx = -1;
+  for (let i = conv.messages.length - 1; i >= 0; i--) {
+    if (conv.messages[i].role === 'user') {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  
+  if (lastUserIdx === -1) return;
+  
+  const lastUserMessage = conv.messages[lastUserIdx];
+  
+  // 設定編輯狀態
+  isEditingMessage.value = true;
+  userInput.value = lastUserMessage.content;
+  
+  // 保留原有圖片
+  if (lastUserMessage.images && lastUserMessage.images.length > 0) {
+    editingImages.value = [...lastUserMessage.images];
+  } else {
+    editingImages.value = [];
+  }
+  
+  // 清空新上傳的圖片
+  clearUploadedImages();
+  
+  // 聚焦到輸入框
+  nextTick(() => {
+    messageInput.value?.focus();
+    // 將游標移到文字末尾
+    if (messageInput.value) {
+      messageInput.value.selectionStart = messageInput.value.value.length;
+      messageInput.value.selectionEnd = messageInput.value.value.length;
+    }
+  });
+}
+
+// 取消編輯
+function cancelEditMessage() {
+  if (!isEditingMessage.value) return;
+  
+  isEditingMessage.value = false;
+  userInput.value = '';
+  editingImages.value = [];
+  clearUploadedImages();
+}
+
 // ========== 模型載入 ==========
 
 async function loadModels() {
@@ -617,7 +728,7 @@ function cancelEditTitle() {
 // ========== 訊息發送 ==========
 
 async function sendMessage() {
-  const hasContent = userInput.value.trim() || uploadedImages.value.length > 0;
+  const hasContent = userInput.value.trim() || uploadedImages.value.length > 0 || editingImages.value.length > 0;
   if (!hasContent || isTyping.value) return;
 
   // 如果沒有當前對話，創建一個新的
@@ -627,6 +738,12 @@ async function sendMessage() {
 
   const conv = currentConversation.value;
   if (!conv) return;
+
+  // 處理編輯模式
+  if (isEditingMessage.value) {
+    await resendEditedMessage(conv);
+    return;
+  }
 
   const userMessage = userInput.value.trim() || '請描述這張圖片';
   const currentImages = uploadedImages.value.map(img => img.base64);
@@ -714,6 +831,124 @@ async function sendMessage() {
     
   } catch (error) {
     console.error('發送訊息失敗:', error);
+    conv.messages.push({
+      role: 'assistant',
+      content: '抱歉，發生錯誤，請稍後再試。',
+      timestamp: Date.now()
+    });
+  } finally {
+    isTyping.value = false;
+    conv.updatedAt = Date.now();
+    saveConversations();
+  }
+}
+
+// 重新發送編輯後的訊息
+async function resendEditedMessage(conv: Conversation) {
+  // 找到最後一個使用者訊息的索引
+  let lastUserIdx = -1;
+  for (let i = conv.messages.length - 1; i >= 0; i--) {
+    if (conv.messages[i].role === 'user') {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  
+  if (lastUserIdx === -1) {
+    cancelEditMessage();
+    return;
+  }
+  
+  // 移除最後一個使用者訊息及其後的所有訊息（包括 AI 回應）
+  conv.messages.splice(lastUserIdx);
+  
+  // 合併編輯中的圖片和新上傳的圖片
+  const allImages = [
+    ...editingImages.value,
+    ...uploadedImages.value.map(img => img.base64)
+  ];
+  
+  const userMessage = userInput.value.trim() || '請描述這張圖片';
+  
+  // 創建新的使用者訊息
+  const newMessage: Message = {
+    role: 'user',
+    content: userMessage,
+    timestamp: Date.now(),
+    images: allImages.length > 0 ? allImages : undefined
+  };
+  
+  conv.messages.push(newMessage);
+  
+  // 重置編輯狀態
+  isEditingMessage.value = false;
+  editingImages.value = [];
+  userInput.value = '';
+  clearUploadedImages();
+  
+  isTyping.value = true;
+  currentResponse.value = '';
+  conv.updatedAt = Date.now();
+  
+  conversations.value.sort((a, b) => b.updatedAt - a.updatedAt);
+  saveConversations();
+  
+  try {
+    const messagesToSend: any[] = [];
+    
+    if (systemPrompt.value.trim()) {
+      messagesToSend.push({ role: 'system', content: systemPrompt.value.trim() });
+    }
+    
+    messagesToSend.push(...conv.messages.map(m => {
+      const msg: any = { role: m.role, content: m.content };
+      if (m.images && m.images.length > 0) {
+        msg.images = m.images;
+      }
+      return msg;
+    }));
+
+    const response = await fetch(`${API_BASE}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: selectedModel.value,
+        messages: messagesToSend,
+        stream: true
+      })
+    });
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader!.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n').filter(line => line.trim().startsWith('data:'));
+      
+      for (const line of lines) {
+        try {
+          const data = JSON.parse(line.replace('data: ', ''));
+          if (data.message?.content) {
+            currentResponse.value += data.message.content;
+            await scrollToBottom();
+          }
+        } catch (e) {}
+      }
+    }
+
+    const assistantMessage: Message = {
+      role: 'assistant',
+      content: currentResponse.value,
+      timestamp: Date.now()
+    };
+    conv.messages.push(assistantMessage);
+    currentResponse.value = '';
+    
+  } catch (error) {
+    console.error('重新發送訊息失敗:', error);
     conv.messages.push({
       role: 'assistant',
       content: '抱歉，發生錯誤，請稍後再試。',
@@ -1355,6 +1590,31 @@ function clearAllData() {
   color: #999;
 }
 
+/* 編輯訊息按鈕 */
+.edit-message-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  opacity: 0;
+  transition: all 0.2s;
+}
+
+.message:hover .edit-message-btn {
+  opacity: 0.6;
+}
+
+.edit-message-btn:hover {
+  opacity: 1 !important;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.message.user .edit-message-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 .typing-indicator {
   font-size: 0.8rem;
   color: #999;
@@ -1437,6 +1697,33 @@ function clearAllData() {
   border-top: 1px solid #e0e0e0;
 }
 
+/* 編輯模式提示 */
+.editing-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #856404;
+}
+
+.cancel-edit-btn {
+  background: none;
+  border: none;
+  color: #856404;
+  cursor: pointer;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.cancel-edit-btn:hover {
+  color: #533f03;
+}
+
 .input-row {
   display: flex;
   gap: 0.5rem;
@@ -1488,6 +1775,10 @@ function clearAllData() {
   border: 1px solid #ddd;
 }
 
+.uploaded-image-item.editing img {
+  border: 2px solid #ffc107;
+}
+
 .remove-image-btn {
   position: absolute;
   top: -8px;
@@ -1530,6 +1821,7 @@ function clearAllData() {
 .input-row > button:last-child {
   padding: 0.75rem 2rem;
   background: #007bff;
+  white-space: nowrap;
   color: white;
   border: none;
   border-radius: 4px;
@@ -1545,6 +1837,14 @@ function clearAllData() {
 .input-row > button:last-child:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.input-row > button.resend-btn {
+  background: #28a745;
+}
+
+.input-row > button.resend-btn:hover:not(:disabled) {
+  background: #218838;
 }
 
 /* 圖片預覽對話框 */
