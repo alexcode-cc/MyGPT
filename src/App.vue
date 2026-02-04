@@ -204,6 +204,17 @@
                 @click="previewImage('data:image/jpeg;base64,' + img)"
               />
             </div>
+            <!-- 顯示附加的音訊 -->
+            <div v-if="msg.audio && msg.audio.length > 0" class="message-audios">
+              <div 
+                v-for="(audio, audioIdx) in msg.audio" 
+                :key="audioIdx"
+                class="message-audio-item"
+              >
+                <span class="audio-icon">🎵</span>
+                <span>音訊檔案 {{ audioIdx + 1 }}</span>
+              </div>
+            </div>
             <div class="message-body" v-html="formatMarkdown(msg.content)"></div>
           </div>
         </div>
@@ -227,25 +238,53 @@
           <button class="cancel-edit-btn" @click="cancelEditMessage">取消編輯</button>
         </div>
 
-        <!-- 圖片預覽區 -->
-        <div v-if="uploadedImages.length > 0 || editingImages.length > 0" class="uploaded-images-preview">
-          <!-- 編輯模式下的原有圖片 -->
-          <div 
-            v-for="(img, idx) in editingImages" 
-            :key="'edit-' + idx" 
-            class="uploaded-image-item editing"
-          >
-            <img :src="'data:image/jpeg;base64,' + img" alt="原有圖片" />
-            <button class="remove-image-btn" @click="removeEditingImage(idx)">✕</button>
+        <!-- 媒體預覽區 -->
+        <div v-if="hasMediaAttachments" class="media-preview-area">
+          <!-- 圖片預覽 -->
+          <div v-if="uploadedImages.length > 0 || editingImages.length > 0" class="uploaded-images-preview">
+            <!-- 編輯模式下的原有圖片 -->
+            <div 
+              v-for="(img, idx) in editingImages" 
+              :key="'edit-img-' + idx" 
+              class="uploaded-image-item editing"
+            >
+              <img :src="'data:image/jpeg;base64,' + img" alt="原有圖片" />
+              <button class="remove-media-btn" @click="removeEditingImage(idx)">✕</button>
+            </div>
+            <!-- 新上傳的圖片 -->
+            <div 
+              v-for="(img, idx) in uploadedImages" 
+              :key="'new-img-' + idx" 
+              class="uploaded-image-item"
+            >
+              <img :src="img.preview" alt="預覽" />
+              <button class="remove-media-btn" @click="removeUploadedImage(idx)">✕</button>
+            </div>
           </div>
-          <!-- 新上傳的圖片 -->
-          <div 
-            v-for="(img, idx) in uploadedImages" 
-            :key="'new-' + idx" 
-            class="uploaded-image-item"
-          >
-            <img :src="img.preview" alt="預覽" />
-            <button class="remove-image-btn" @click="removeUploadedImage(idx)">✕</button>
+          
+          <!-- 音訊預覽 -->
+          <div v-if="uploadedAudios.length > 0 || editingAudios.length > 0" class="uploaded-audios-preview">
+            <!-- 編輯模式下的原有音訊 -->
+            <div 
+              v-for="(audio, idx) in editingAudios" 
+              :key="'edit-audio-' + idx" 
+              class="uploaded-audio-item editing"
+            >
+              <span class="audio-icon">🎵</span>
+              <span class="audio-name">音訊 {{ idx + 1 }}</span>
+              <button class="remove-media-btn" @click="removeEditingAudio(idx)">✕</button>
+            </div>
+            <!-- 新上傳的音訊 -->
+            <div 
+              v-for="(audio, idx) in uploadedAudios" 
+              :key="'new-audio-' + idx" 
+              class="uploaded-audio-item"
+            >
+              <span class="audio-icon">🎵</span>
+              <span class="audio-name">{{ truncateFilename(audio.name) }}</span>
+              <span class="audio-duration" v-if="audio.duration">{{ audio.duration }}</span>
+              <button class="remove-media-btn" @click="removeUploadedAudio(idx)">✕</button>
+            </div>
           </div>
         </div>
         
@@ -256,16 +295,34 @@
             ref="fileInput"
             accept="image/*"
             multiple
-            @change="handleFileUpload"
+            @change="handleImageUpload"
             style="display: none"
           />
           <button 
             class="upload-btn" 
-            @click="triggerFileUpload"
+            @click="triggerImageUpload"
             :disabled="isTyping"
-            title="上傳圖片（支援多模態模型）"
+            title="上傳圖片（支援視覺模型如 qwen3-vl）"
           >
             📷
+          </button>
+          
+          <!-- 上傳音訊按鈕 -->
+          <input
+            type="file"
+            ref="audioInput"
+            accept="audio/*"
+            multiple
+            @change="handleAudioUpload"
+            style="display: none"
+          />
+          <button 
+            class="upload-btn" 
+            @click="triggerAudioUpload"
+            :disabled="isTyping"
+            title="上傳音訊（支援語音模型如 qwen2-audio）"
+          >
+            🎤
           </button>
           
           <textarea
@@ -274,12 +331,12 @@
             @keydown.enter.exact.prevent="sendMessage"
             @keydown.escape="cancelEditMessage"
             @paste="handlePaste"
-            :placeholder="isEditingMessage ? '編輯訊息後按 Enter 重新發送，Esc 取消' : '輸入訊息... (Enter 發送, Shift+Enter 換行，可貼上或拖放圖片)'"
+            :placeholder="isEditingMessage ? '編輯訊息後按 Enter 重新發送，Esc 取消' : '輸入訊息... (Enter 發送, Shift+Enter 換行，可上傳圖片或音訊)'"
             :disabled="isTyping"
           />
           <button 
             @click="sendMessage" 
-            :disabled="isTyping || (!userInput.trim() && uploadedImages.length === 0 && editingImages.length === 0)"
+            :disabled="isTyping || !hasContent"
             :class="{ 'resend-btn': isEditingMessage }"
           >
             {{ isEditingMessage ? '重新發送' : '發送' }}
@@ -306,11 +363,19 @@ interface Message {
   content: string;
   timestamp?: number;
   images?: string[]; // base64 編碼的圖片
+  audio?: string[]; // base64 編碼的音訊
 }
 
 interface UploadedImage {
   file: File;
   preview: string;
+  base64: string;
+}
+
+interface UploadedAudio {
+  file: File;
+  name: string;
+  duration: string;
   base64: string;
 }
 
@@ -361,6 +426,11 @@ const messageInput = ref<HTMLTextAreaElement>();
 // 編輯訊息狀態
 const isEditingMessage = ref(false);
 const editingImages = ref<string[]>([]); // 編輯時保留的原有圖片（base64）
+const editingAudios = ref<string[]>([]); // 編輯時保留的原有音訊（base64）
+
+// 音訊上傳狀態
+const uploadedAudios = ref<UploadedAudio[]>([]);
+const audioInput = ref<HTMLInputElement>();
 
 // 預設提示詞範本
 const promptTemplates = [
@@ -379,6 +449,23 @@ const currentConversation = computed(() => {
 
 const messages = computed(() => {
   return currentConversation.value?.messages || [];
+});
+
+// 是否有媒體附件
+const hasMediaAttachments = computed(() => {
+  return uploadedImages.value.length > 0 || 
+         editingImages.value.length > 0 ||
+         uploadedAudios.value.length > 0 ||
+         editingAudios.value.length > 0;
+});
+
+// 是否有內容可發送
+const hasContent = computed(() => {
+  return userInput.value.trim() || 
+         uploadedImages.value.length > 0 || 
+         editingImages.value.length > 0 ||
+         uploadedAudios.value.length > 0 ||
+         editingAudios.value.length > 0;
 });
 
 // 生命週期
@@ -447,11 +534,11 @@ function saveCurrentConversationId() {
 
 // ========== 圖片上傳 ==========
 
-function triggerFileUpload() {
+function triggerImageUpload() {
   fileInput.value?.click();
 }
 
-async function handleFileUpload(event: Event) {
+async function handleImageUpload(event: Event) {
   const input = event.target as HTMLInputElement;
   if (!input.files) return;
   
@@ -501,6 +588,89 @@ async function addImage(file: File) {
     preview,
     base64
   });
+}
+
+// ========== 音訊上傳 ==========
+
+function triggerAudioUpload() {
+  audioInput.value?.click();
+}
+
+async function handleAudioUpload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (!input.files) return;
+  
+  for (const file of Array.from(input.files)) {
+    if (file.type.startsWith('audio/')) {
+      await addAudio(file);
+    }
+  }
+  
+  input.value = '';
+}
+
+async function addAudio(file: File) {
+  // 限制最多 2 個音訊
+  if (uploadedAudios.value.length >= 2) {
+    alert('最多只能上傳 2 個音訊檔案');
+    return;
+  }
+  
+  // 限制檔案大小 (25MB)
+  if (file.size > 25 * 1024 * 1024) {
+    alert('音訊大小不能超過 25MB');
+    return;
+  }
+  
+  const base64 = await fileToBase64(file);
+  const duration = await getAudioDuration(file);
+  
+  uploadedAudios.value.push({
+    file,
+    name: file.name,
+    duration,
+    base64
+  });
+}
+
+function getAudioDuration(file: File): Promise<string> {
+  return new Promise((resolve) => {
+    const audio = new Audio();
+    audio.src = URL.createObjectURL(file);
+    audio.onloadedmetadata = () => {
+      const duration = audio.duration;
+      URL.revokeObjectURL(audio.src);
+      if (isNaN(duration) || !isFinite(duration)) {
+        resolve('');
+      } else {
+        const minutes = Math.floor(duration / 60);
+        const seconds = Math.floor(duration % 60);
+        resolve(`${minutes}:${seconds.toString().padStart(2, '0')}`);
+      }
+    };
+    audio.onerror = () => {
+      resolve('');
+    };
+  });
+}
+
+function removeUploadedAudio(index: number) {
+  uploadedAudios.value.splice(index, 1);
+}
+
+function clearUploadedAudios() {
+  uploadedAudios.value = [];
+}
+
+function removeEditingAudio(index: number) {
+  editingAudios.value.splice(index, 1);
+}
+
+function truncateFilename(name: string, maxLength: number = 15): string {
+  if (name.length <= maxLength) return name;
+  const ext = name.split('.').pop() || '';
+  const base = name.slice(0, maxLength - ext.length - 4);
+  return `${base}...${ext}`;
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -586,8 +756,16 @@ function editLastMessage() {
     editingImages.value = [];
   }
   
-  // 清空新上傳的圖片
+  // 保留原有音訊
+  if (lastUserMessage.audio && lastUserMessage.audio.length > 0) {
+    editingAudios.value = [...lastUserMessage.audio];
+  } else {
+    editingAudios.value = [];
+  }
+  
+  // 清空新上傳的媒體
   clearUploadedImages();
+  clearUploadedAudios();
   
   // 聚焦到輸入框
   nextTick(() => {
@@ -607,7 +785,9 @@ function cancelEditMessage() {
   isEditingMessage.value = false;
   userInput.value = '';
   editingImages.value = [];
+  editingAudios.value = [];
   clearUploadedImages();
+  clearUploadedAudios();
 }
 
 // ========== 模型載入 ==========
@@ -728,8 +908,7 @@ function cancelEditTitle() {
 // ========== 訊息發送 ==========
 
 async function sendMessage() {
-  const hasContent = userInput.value.trim() || uploadedImages.value.length > 0 || editingImages.value.length > 0;
-  if (!hasContent || isTyping.value) return;
+  if (!hasContent.value || isTyping.value) return;
 
   // 如果沒有當前對話，創建一個新的
   if (!currentConversationId.value) {
@@ -745,26 +924,44 @@ async function sendMessage() {
     return;
   }
 
-  const userMessage = userInput.value.trim() || '請描述這張圖片';
+  // 收集媒體
   const currentImages = uploadedImages.value.map(img => img.base64);
+  const currentAudios = uploadedAudios.value.map(audio => audio.base64);
+  
+  // 決定預設訊息
+  let defaultMessage = '請描述';
+  if (currentImages.length > 0 && currentAudios.length > 0) {
+    defaultMessage = '請描述這些圖片和音訊';
+  } else if (currentImages.length > 0) {
+    defaultMessage = '請描述這張圖片';
+  } else if (currentAudios.length > 0) {
+    defaultMessage = '請描述這段音訊';
+  }
+  
+  const userMessage = userInput.value.trim() || defaultMessage;
   
   const newMessage: Message = {
     role: 'user',
     content: userMessage,
     timestamp: Date.now(),
-    images: currentImages.length > 0 ? currentImages : undefined
+    images: currentImages.length > 0 ? currentImages : undefined,
+    audio: currentAudios.length > 0 ? currentAudios : undefined
   };
   
   conv.messages.push(newMessage);
   
   // 如果是第一則訊息，用它作為對話標題
   if (conv.messages.length === 1) {
-    const titleText = currentImages.length > 0 ? `📷 ${userMessage}` : userMessage;
+    let prefix = '';
+    if (currentImages.length > 0) prefix += '📷 ';
+    if (currentAudios.length > 0) prefix += '🎵 ';
+    const titleText = prefix + userMessage;
     conv.title = titleText.slice(0, 30) + (titleText.length > 30 ? '...' : '');
   }
   
   userInput.value = '';
   clearUploadedImages();
+  clearUploadedAudios();
   isTyping.value = true;
   currentResponse.value = '';
   conv.updatedAt = Date.now();
@@ -781,11 +978,14 @@ async function sendMessage() {
       messagesToSend.push({ role: 'system', content: systemPrompt.value.trim() });
     }
     
-    // 發送 role、content 和 images（如果有的話）
+    // 發送 role、content、images 和 audio
     messagesToSend.push(...conv.messages.map(m => {
       const msg: any = { role: m.role, content: m.content };
       if (m.images && m.images.length > 0) {
         msg.images = m.images;
+      }
+      if (m.audio && m.audio.length > 0) {
+        msg.audio = m.audio;
       }
       return msg;
     }));
@@ -862,20 +1062,36 @@ async function resendEditedMessage(conv: Conversation) {
   // 移除最後一個使用者訊息及其後的所有訊息（包括 AI 回應）
   conv.messages.splice(lastUserIdx);
   
-  // 合併編輯中的圖片和新上傳的圖片
+  // 合併編輯中的媒體和新上傳的媒體
   const allImages = [
     ...editingImages.value,
     ...uploadedImages.value.map(img => img.base64)
   ];
   
-  const userMessage = userInput.value.trim() || '請描述這張圖片';
+  const allAudios = [
+    ...editingAudios.value,
+    ...uploadedAudios.value.map(audio => audio.base64)
+  ];
+  
+  // 決定預設訊息
+  let defaultMessage = '請描述';
+  if (allImages.length > 0 && allAudios.length > 0) {
+    defaultMessage = '請描述這些圖片和音訊';
+  } else if (allImages.length > 0) {
+    defaultMessage = '請描述這張圖片';
+  } else if (allAudios.length > 0) {
+    defaultMessage = '請描述這段音訊';
+  }
+  
+  const userMessage = userInput.value.trim() || defaultMessage;
   
   // 創建新的使用者訊息
   const newMessage: Message = {
     role: 'user',
     content: userMessage,
     timestamp: Date.now(),
-    images: allImages.length > 0 ? allImages : undefined
+    images: allImages.length > 0 ? allImages : undefined,
+    audio: allAudios.length > 0 ? allAudios : undefined
   };
   
   conv.messages.push(newMessage);
@@ -883,8 +1099,10 @@ async function resendEditedMessage(conv: Conversation) {
   // 重置編輯狀態
   isEditingMessage.value = false;
   editingImages.value = [];
+  editingAudios.value = [];
   userInput.value = '';
   clearUploadedImages();
+  clearUploadedAudios();
   
   isTyping.value = true;
   currentResponse.value = '';
@@ -904,6 +1122,9 @@ async function resendEditedMessage(conv: Conversation) {
       const msg: any = { role: m.role, content: m.content };
       if (m.images && m.images.length > 0) {
         msg.images = m.images;
+      }
+      if (m.audio && m.audio.length > 0) {
+        msg.audio = m.audio;
       }
       return msg;
     }));
@@ -1687,6 +1908,28 @@ function clearAllData() {
   border: 2px solid rgba(255,255,255,0.3);
 }
 
+/* 訊息中的音訊 */
+.message-audios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.message-audio-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.message.user .message-audio-item {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 /* 輸入區域 */
 .input-area {
   display: flex;
@@ -1751,6 +1994,13 @@ function clearAllData() {
   cursor: not-allowed;
 }
 
+/* 媒體預覽區 */
+.media-preview-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 /* 上傳圖片預覽 */
 .uploaded-images-preview {
   display: flex;
@@ -1775,11 +2025,55 @@ function clearAllData() {
   border: 1px solid #ddd;
 }
 
+/* 上傳音訊預覽 */
+.uploaded-audios-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: #f0f8ff;
+  border-radius: 4px;
+}
+
+.uploaded-audio-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: white;
+  border: 1px solid #b8daff;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  position: relative;
+}
+
+.uploaded-audio-item.editing {
+  border-color: #ffc107;
+  background: #fff9e6;
+}
+
+.audio-icon {
+  font-size: 1rem;
+}
+
+.audio-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audio-duration {
+  color: #666;
+  font-size: 0.75rem;
+}
+
 .uploaded-image-item.editing img {
   border: 2px solid #ffc107;
 }
 
-.remove-image-btn {
+/* 移除媒體按鈕 */
+.remove-media-btn {
   position: absolute;
   top: -8px;
   right: -8px;
@@ -1797,8 +2091,13 @@ function clearAllData() {
   padding: 0;
 }
 
-.remove-image-btn:hover {
+.remove-media-btn:hover {
   background: #c82333;
+}
+
+.uploaded-audio-item .remove-media-btn {
+  position: static;
+  margin-left: 0.25rem;
 }
 
 .input-area textarea {
