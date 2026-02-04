@@ -4,11 +4,11 @@ const axios = require('axios');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // 增加 body 大小限制以支援圖片
 
 const OLLAMA_API = 'http://localhost:11434/api';
 
-// 對話 API
+// 對話 API（支援圖片）
 app.post('/api/chat', async (req, res) => {
   const { model, messages, stream = true } = req.body;
   
@@ -46,6 +46,7 @@ app.post('/api/chat', async (req, res) => {
       res.json(response.data);
     }
   } catch (error) {
+    console.error('Chat API Error:', error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });

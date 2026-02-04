@@ -184,6 +184,17 @@
               <span class="role-label">{{ msg.role === 'user' ? '你' : 'AI' }}</span>
               <span class="message-time" v-if="msg.timestamp">{{ formatTime(msg.timestamp) }}</span>
             </div>
+            <!-- 顯示附加的圖片 -->
+            <div v-if="msg.images && msg.images.length > 0" class="message-images">
+              <img 
+                v-for="(img, imgIdx) in msg.images" 
+                :key="imgIdx" 
+                :src="'data:image/jpeg;base64,' + img" 
+                alt="上傳的圖片"
+                class="message-image"
+                @click="previewImage('data:image/jpeg;base64,' + img)"
+              />
+            </div>
             <div class="message-body" v-html="formatMarkdown(msg.content)"></div>
           </div>
         </div>
@@ -201,17 +212,59 @@
       </div>
 
       <div class="input-area">
-        <textarea
-          v-model="userInput"
-          @keydown.enter.exact.prevent="sendMessage"
-          placeholder="輸入訊息... (Enter 發送, Shift+Enter 換行)"
-          :disabled="isTyping"
-        />
-        <button @click="sendMessage" :disabled="isTyping || !userInput.trim()">
-          發送
-        </button>
+        <!-- 圖片預覽區 -->
+        <div v-if="uploadedImages.length > 0" class="uploaded-images-preview">
+          <div 
+            v-for="(img, idx) in uploadedImages" 
+            :key="idx" 
+            class="uploaded-image-item"
+          >
+            <img :src="img.preview" alt="預覽" />
+            <button class="remove-image-btn" @click="removeUploadedImage(idx)">✕</button>
+          </div>
+        </div>
+        
+        <div class="input-row">
+          <!-- 上傳圖片按鈕 -->
+          <input
+            type="file"
+            ref="fileInput"
+            accept="image/*"
+            multiple
+            @change="handleFileUpload"
+            style="display: none"
+          />
+          <button 
+            class="upload-btn" 
+            @click="triggerFileUpload"
+            :disabled="isTyping"
+            title="上傳圖片（支援多模態模型）"
+          >
+            📷
+          </button>
+          
+          <textarea
+            v-model="userInput"
+            @keydown.enter.exact.prevent="sendMessage"
+            @paste="handlePaste"
+            placeholder="輸入訊息... (Enter 發送, Shift+Enter 換行，可貼上或拖放圖片)"
+            :disabled="isTyping"
+          />
+          <button 
+            @click="sendMessage" 
+            :disabled="isTyping || (!userInput.trim() && uploadedImages.length === 0)"
+          >
+            發送
+          </button>
+        </div>
       </div>
     </main>
+
+    <!-- 圖片預覽對話框 -->
+    <div v-if="previewImageUrl" class="image-preview-modal" @click="previewImageUrl = null">
+      <img :src="previewImageUrl" alt="預覽圖片" @click.stop />
+      <button class="close-preview-btn" @click="previewImageUrl = null">✕</button>
+    </div>
   </div>
 </template>
 
@@ -224,6 +277,13 @@ interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp?: number;
+  images?: string[]; // base64 編碼的圖片
+}
+
+interface UploadedImage {
+  file: File;
+  preview: string;
+  base64: string;
 }
 
 interface Conversation {
@@ -263,6 +323,11 @@ const editTitleInput = ref<HTMLInputElement>();
 
 // 模型下拉選單狀態
 const showModelDropdown = ref(false);
+
+// 圖片上傳狀態
+const uploadedImages = ref<UploadedImage[]>([]);
+const fileInput = ref<HTMLInputElement>();
+const previewImageUrl = ref<string | null>(null);
 
 // 預設提示詞範本
 const promptTemplates = [
@@ -345,6 +410,93 @@ function saveCurrentConversationId() {
   } else {
     localStorage.removeItem(CURRENT_CONV_KEY);
   }
+}
+
+// ========== 圖片上傳 ==========
+
+function triggerFileUpload() {
+  fileInput.value?.click();
+}
+
+async function handleFileUpload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (!input.files) return;
+  
+  for (const file of Array.from(input.files)) {
+    if (file.type.startsWith('image/')) {
+      await addImage(file);
+    }
+  }
+  
+  // 清空 input 以便重複選擇同一檔案
+  input.value = '';
+}
+
+async function handlePaste(event: ClipboardEvent) {
+  const items = event.clipboardData?.items;
+  if (!items) return;
+  
+  for (const item of Array.from(items)) {
+    if (item.type.startsWith('image/')) {
+      event.preventDefault();
+      const file = item.getAsFile();
+      if (file) {
+        await addImage(file);
+      }
+    }
+  }
+}
+
+async function addImage(file: File) {
+  // 限制最多 4 張圖片
+  if (uploadedImages.value.length >= 4) {
+    alert('最多只能上傳 4 張圖片');
+    return;
+  }
+  
+  // 限制檔案大小 (10MB)
+  if (file.size > 10 * 1024 * 1024) {
+    alert('圖片大小不能超過 10MB');
+    return;
+  }
+  
+  const base64 = await fileToBase64(file);
+  const preview = URL.createObjectURL(file);
+  
+  uploadedImages.value.push({
+    file,
+    preview,
+    base64
+  });
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // 移除 data:image/xxx;base64, 前綴
+      const base64 = result.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function removeUploadedImage(index: number) {
+  const img = uploadedImages.value[index];
+  URL.revokeObjectURL(img.preview);
+  uploadedImages.value.splice(index, 1);
+}
+
+function clearUploadedImages() {
+  uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
+  uploadedImages.value = [];
+}
+
+function previewImage(url: string) {
+  previewImageUrl.value = url;
 }
 
 // ========== 模型載入 ==========
@@ -465,7 +617,8 @@ function cancelEditTitle() {
 // ========== 訊息發送 ==========
 
 async function sendMessage() {
-  if (!userInput.value.trim() || isTyping.value) return;
+  const hasContent = userInput.value.trim() || uploadedImages.value.length > 0;
+  if (!hasContent || isTyping.value) return;
 
   // 如果沒有當前對話，創建一個新的
   if (!currentConversationId.value) {
@@ -475,21 +628,26 @@ async function sendMessage() {
   const conv = currentConversation.value;
   if (!conv) return;
 
-  const userMessage = userInput.value.trim();
+  const userMessage = userInput.value.trim() || '請描述這張圖片';
+  const currentImages = uploadedImages.value.map(img => img.base64);
+  
   const newMessage: Message = {
     role: 'user',
     content: userMessage,
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    images: currentImages.length > 0 ? currentImages : undefined
   };
   
   conv.messages.push(newMessage);
   
   // 如果是第一則訊息，用它作為對話標題
   if (conv.messages.length === 1) {
-    conv.title = userMessage.slice(0, 30) + (userMessage.length > 30 ? '...' : '');
+    const titleText = currentImages.length > 0 ? `📷 ${userMessage}` : userMessage;
+    conv.title = titleText.slice(0, 30) + (titleText.length > 30 ? '...' : '');
   }
   
   userInput.value = '';
+  clearUploadedImages();
   isTyping.value = true;
   currentResponse.value = '';
   conv.updatedAt = Date.now();
@@ -500,14 +658,20 @@ async function sendMessage() {
 
   try {
     // 構建要發送的訊息
-    const messagesToSend: Message[] = [];
+    const messagesToSend: any[] = [];
     
     if (systemPrompt.value.trim()) {
       messagesToSend.push({ role: 'system', content: systemPrompt.value.trim() });
     }
     
-    // 只發送 role 和 content
-    messagesToSend.push(...conv.messages.map(m => ({ role: m.role, content: m.content })));
+    // 發送 role、content 和 images（如果有的話）
+    messagesToSend.push(...conv.messages.map(m => {
+      const msg: any = { role: m.role, content: m.content };
+      if (m.images && m.images.length > 0) {
+        msg.images = m.images;
+      }
+      return msg;
+    }));
 
     const response = await fetch(`${API_BASE}/chat`, {
       method: 'POST',
@@ -1238,12 +1402,112 @@ function clearAllData() {
   color: rgba(255,255,255,0.6);
 }
 
+/* 訊息中的圖片 */
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.message-image {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: transform 0.2s;
+  object-fit: cover;
+}
+
+.message-image:hover {
+  transform: scale(1.02);
+}
+
+.message.user .message-image {
+  border: 2px solid rgba(255,255,255,0.3);
+}
+
+/* 輸入區域 */
 .input-area {
   display: flex;
-  gap: 1rem;
+  flex-direction: column;
+  gap: 0.5rem;
   padding: 1rem 2rem;
   background: white;
   border-top: 1px solid #e0e0e0;
+}
+
+.input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.upload-btn {
+  padding: 0.75rem;
+  background: #e9ecef;
+  color: #495057;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1.2rem;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.upload-btn:hover:not(:disabled) {
+  background: #dee2e6;
+}
+
+.upload-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 上傳圖片預覽 */
+.uploaded-images-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.uploaded-image-item {
+  position: relative;
+  width: 80px;
+  height: 80px;
+}
+
+.uploaded-image-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+}
+
+.remove-image-btn {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #dc3545;
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 0.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.remove-image-btn:hover {
+  background: #c82333;
 }
 
 .input-area textarea {
@@ -1263,7 +1527,7 @@ function clearAllData() {
   border-color: #007bff;
 }
 
-.input-area button {
+.input-row > button:last-child {
   padding: 0.75rem 2rem;
   background: #007bff;
   color: white;
@@ -1271,15 +1535,60 @@ function clearAllData() {
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.2s;
+  flex-shrink: 0;
 }
 
-.input-area button:hover:not(:disabled) {
+.input-row > button:last-child:hover:not(:disabled) {
   background: #0056b3;
 }
 
-.input-area button:disabled {
+.input-row > button:last-child:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 圖片預覽對話框 */
+.image-preview-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  cursor: pointer;
+}
+
+.image-preview-modal img {
+  max-width: 90%;
+  max-height: 90%;
+  object-fit: contain;
+  border-radius: 4px;
+  cursor: default;
+}
+
+.close-preview-btn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-preview-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 /* 響應式設計 */
