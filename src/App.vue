@@ -204,17 +204,6 @@
                 @click="previewImage('data:image/jpeg;base64,' + img)"
               />
             </div>
-            <!-- 顯示附加的音訊 -->
-            <div v-if="msg.audio && msg.audio.length > 0" class="message-audios">
-              <div 
-                v-for="(audio, audioIdx) in msg.audio" 
-                :key="audioIdx"
-                class="message-audio-item"
-              >
-                <span class="audio-icon">🎵</span>
-                <span>音訊檔案 {{ audioIdx + 1 }}</span>
-              </div>
-            </div>
             <div class="message-body" v-html="formatMarkdown(msg.content)"></div>
           </div>
         </div>
@@ -238,54 +227,32 @@
           <button class="cancel-edit-btn" @click="cancelEditMessage">取消編輯</button>
         </div>
 
-        <!-- 媒體預覽區 -->
-        <div v-if="hasMediaAttachments" class="media-preview-area">
-          <!-- 圖片預覽 -->
-          <div v-if="uploadedImages.length > 0 || editingImages.length > 0" class="uploaded-images-preview">
-            <!-- 編輯模式下的原有圖片 -->
-            <div 
-              v-for="(img, idx) in editingImages" 
-              :key="'edit-img-' + idx" 
-              class="uploaded-image-item editing"
-            >
-              <img :src="'data:image/jpeg;base64,' + img" alt="原有圖片" />
-              <button class="remove-media-btn" @click="removeEditingImage(idx)">✕</button>
-            </div>
-            <!-- 新上傳的圖片 -->
-            <div 
-              v-for="(img, idx) in uploadedImages" 
-              :key="'new-img-' + idx" 
-              class="uploaded-image-item"
-            >
-              <img :src="img.preview" alt="預覽" />
-              <button class="remove-media-btn" @click="removeUploadedImage(idx)">✕</button>
-            </div>
+        <!-- 圖片預覽區 -->
+        <div v-if="uploadedImages.length > 0 || editingImages.length > 0" class="uploaded-images-preview">
+          <!-- 編輯模式下的原有圖片 -->
+          <div 
+            v-for="(img, idx) in editingImages" 
+            :key="'edit-img-' + idx" 
+            class="uploaded-image-item editing"
+          >
+            <img :src="'data:image/jpeg;base64,' + img" alt="原有圖片" />
+            <button class="remove-media-btn" @click="removeEditingImage(idx)">✕</button>
           </div>
-          
-          <!-- 音訊預覽 -->
-          <div v-if="uploadedAudios.length > 0 || editingAudios.length > 0" class="uploaded-audios-preview">
-            <!-- 編輯模式下的原有音訊 -->
-            <div 
-              v-for="(audio, idx) in editingAudios" 
-              :key="'edit-audio-' + idx" 
-              class="uploaded-audio-item editing"
-            >
-              <span class="audio-icon">🎵</span>
-              <span class="audio-name">音訊 {{ idx + 1 }}</span>
-              <button class="remove-media-btn" @click="removeEditingAudio(idx)">✕</button>
-            </div>
-            <!-- 新上傳的音訊 -->
-            <div 
-              v-for="(audio, idx) in uploadedAudios" 
-              :key="'new-audio-' + idx" 
-              class="uploaded-audio-item"
-            >
-              <span class="audio-icon">🎵</span>
-              <span class="audio-name">{{ truncateFilename(audio.name) }}</span>
-              <span class="audio-duration" v-if="audio.duration">{{ audio.duration }}</span>
-              <button class="remove-media-btn" @click="removeUploadedAudio(idx)">✕</button>
-            </div>
+          <!-- 新上傳的圖片 -->
+          <div 
+            v-for="(img, idx) in uploadedImages" 
+            :key="'new-img-' + idx" 
+            class="uploaded-image-item"
+          >
+            <img :src="img.preview" alt="預覽" />
+            <button class="remove-media-btn" @click="removeUploadedImage(idx)">✕</button>
           </div>
+        </div>
+        
+        <!-- 語音輸入狀態 -->
+        <div v-if="isRecording" class="speech-indicator">
+          <span class="recording-dot"></span>
+          <span>正在聆聽... 說完後點擊麥克風停止</span>
         </div>
         
         <div class="input-row">
@@ -307,22 +274,15 @@
             📷
           </button>
           
-          <!-- 上傳音訊按鈕 -->
-          <input
-            type="file"
-            ref="audioInput"
-            accept="audio/*"
-            multiple
-            @change="handleAudioUpload"
-            style="display: none"
-          />
+          <!-- 語音輸入按鈕 -->
           <button 
-            class="upload-btn" 
-            @click="triggerAudioUpload"
-            :disabled="isTyping"
-            title="上傳音訊（支援語音模型如 qwen2-audio）"
+            class="upload-btn"
+            :class="{ 'recording': isRecording }"
+            @click="toggleSpeechRecognition"
+            :disabled="isTyping || !speechSupported"
+            :title="speechSupported ? (isRecording ? '停止語音輸入' : '語音輸入（點擊開始說話）') : '您的瀏覽器不支援語音輸入'"
           >
-            🎤
+            {{ isRecording ? '🔴' : '🎤' }}
           </button>
           
           <textarea
@@ -331,7 +291,7 @@
             @keydown.enter.exact.prevent="sendMessage"
             @keydown.escape="cancelEditMessage"
             @paste="handlePaste"
-            :placeholder="isEditingMessage ? '編輯訊息後按 Enter 重新發送，Esc 取消' : '輸入訊息... (Enter 發送, Shift+Enter 換行，可上傳圖片或音訊)'"
+            :placeholder="getInputPlaceholder"
             :disabled="isTyping"
           />
           <button 
@@ -363,7 +323,6 @@ interface Message {
   content: string;
   timestamp?: number;
   images?: string[]; // base64 編碼的圖片
-  audio?: string[]; // base64 編碼的音訊
 }
 
 interface UploadedImage {
@@ -372,11 +331,28 @@ interface UploadedImage {
   base64: string;
 }
 
-interface UploadedAudio {
-  file: File;
-  name: string;
-  duration: string;
-  base64: string;
+// 語音識別介面
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean;
+  length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
 }
 
 interface Conversation {
@@ -426,11 +402,11 @@ const messageInput = ref<HTMLTextAreaElement>();
 // 編輯訊息狀態
 const isEditingMessage = ref(false);
 const editingImages = ref<string[]>([]); // 編輯時保留的原有圖片（base64）
-const editingAudios = ref<string[]>([]); // 編輯時保留的原有音訊（base64）
 
-// 音訊上傳狀態
-const uploadedAudios = ref<UploadedAudio[]>([]);
-const audioInput = ref<HTMLInputElement>();
+// 語音輸入狀態
+const isRecording = ref(false);
+const speechRecognition = ref<any>(null);
+const speechSupported = ref(false);
 
 // 預設提示詞範本
 const promptTemplates = [
@@ -451,27 +427,29 @@ const messages = computed(() => {
   return currentConversation.value?.messages || [];
 });
 
-// 是否有媒體附件
-const hasMediaAttachments = computed(() => {
-  return uploadedImages.value.length > 0 || 
-         editingImages.value.length > 0 ||
-         uploadedAudios.value.length > 0 ||
-         editingAudios.value.length > 0;
-});
-
 // 是否有內容可發送
 const hasContent = computed(() => {
   return userInput.value.trim() || 
          uploadedImages.value.length > 0 || 
-         editingImages.value.length > 0 ||
-         uploadedAudios.value.length > 0 ||
-         editingAudios.value.length > 0;
+         editingImages.value.length > 0;
+});
+
+// 輸入框 placeholder
+const getInputPlaceholder = computed(() => {
+  if (isEditingMessage.value) {
+    return '編輯訊息後按 Enter 重新發送，Esc 取消';
+  }
+  if (isRecording.value) {
+    return '正在聆聽...';
+  }
+  return '輸入訊息... (Enter 發送, Shift+Enter 換行)';
 });
 
 // 生命週期
 onMounted(async () => {
   await loadModels();
   loadSavedData();
+  initSpeechRecognition();
 });
 
 // 監聽模型變更
@@ -590,87 +568,91 @@ async function addImage(file: File) {
   });
 }
 
-// ========== 音訊上傳 ==========
+// ========== 語音輸入 ==========
 
-function triggerAudioUpload() {
-  audioInput.value?.click();
+function initSpeechRecognition() {
+  // 檢查瀏覽器是否支援語音識別
+  const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  
+  if (!SpeechRecognitionAPI) {
+    speechSupported.value = false;
+    console.log('此瀏覽器不支援語音識別');
+    return;
+  }
+  
+  speechSupported.value = true;
+  
+  const recognition = new SpeechRecognitionAPI();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'zh-TW'; // 預設繁體中文
+  
+  recognition.onresult = (event: SpeechRecognitionEvent) => {
+    let finalTranscript = '';
+    let interimTranscript = '';
+    
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        finalTranscript += transcript;
+      } else {
+        interimTranscript += transcript;
+      }
+    }
+    
+    // 將識別到的文字加入輸入框
+    if (finalTranscript) {
+      userInput.value += finalTranscript;
+    }
+  };
+  
+  recognition.onerror = (event: any) => {
+    console.error('語音識別錯誤:', event.error);
+    isRecording.value = false;
+    
+    if (event.error === 'not-allowed') {
+      alert('請允許麥克風存取權限以使用語音輸入功能');
+    } else if (event.error === 'no-speech') {
+      // 沒有偵測到語音，靜默處理
+    } else {
+      alert(`語音識別錯誤: ${event.error}`);
+    }
+  };
+  
+  recognition.onend = () => {
+    // 如果仍在錄音狀態，重新啟動（continuous 模式有時會自動停止）
+    if (isRecording.value) {
+      try {
+        recognition.start();
+      } catch (e) {
+        isRecording.value = false;
+      }
+    }
+  };
+  
+  speechRecognition.value = recognition;
 }
 
-async function handleAudioUpload(event: Event) {
-  const input = event.target as HTMLInputElement;
-  if (!input.files) return;
+function toggleSpeechRecognition() {
+  if (!speechRecognition.value) {
+    alert('您的瀏覽器不支援語音輸入功能');
+    return;
+  }
   
-  for (const file of Array.from(input.files)) {
-    if (file.type.startsWith('audio/')) {
-      await addAudio(file);
+  if (isRecording.value) {
+    // 停止錄音
+    speechRecognition.value.stop();
+    isRecording.value = false;
+  } else {
+    // 開始錄音
+    try {
+      speechRecognition.value.start();
+      isRecording.value = true;
+    } catch (e) {
+      console.error('無法啟動語音識別:', e);
+      alert('無法啟動語音識別，請檢查麥克風權限');
     }
   }
-  
-  input.value = '';
-}
-
-async function addAudio(file: File) {
-  // 限制最多 2 個音訊
-  if (uploadedAudios.value.length >= 2) {
-    alert('最多只能上傳 2 個音訊檔案');
-    return;
-  }
-  
-  // 限制檔案大小 (25MB)
-  if (file.size > 25 * 1024 * 1024) {
-    alert('音訊大小不能超過 25MB');
-    return;
-  }
-  
-  const base64 = await fileToBase64(file);
-  const duration = await getAudioDuration(file);
-  
-  uploadedAudios.value.push({
-    file,
-    name: file.name,
-    duration,
-    base64
-  });
-}
-
-function getAudioDuration(file: File): Promise<string> {
-  return new Promise((resolve) => {
-    const audio = new Audio();
-    audio.src = URL.createObjectURL(file);
-    audio.onloadedmetadata = () => {
-      const duration = audio.duration;
-      URL.revokeObjectURL(audio.src);
-      if (isNaN(duration) || !isFinite(duration)) {
-        resolve('');
-      } else {
-        const minutes = Math.floor(duration / 60);
-        const seconds = Math.floor(duration % 60);
-        resolve(`${minutes}:${seconds.toString().padStart(2, '0')}`);
-      }
-    };
-    audio.onerror = () => {
-      resolve('');
-    };
-  });
-}
-
-function removeUploadedAudio(index: number) {
-  uploadedAudios.value.splice(index, 1);
-}
-
-function clearUploadedAudios() {
-  uploadedAudios.value = [];
-}
-
-function removeEditingAudio(index: number) {
-  editingAudios.value.splice(index, 1);
-}
-
-function truncateFilename(name: string, maxLength: number = 15): string {
-  if (name.length <= maxLength) return name;
-  const ext = name.split('.').pop() || '';
-  const base = name.slice(0, maxLength - ext.length - 4);
-  return `${base}...${ext}`;
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -756,16 +738,8 @@ function editLastMessage() {
     editingImages.value = [];
   }
   
-  // 保留原有音訊
-  if (lastUserMessage.audio && lastUserMessage.audio.length > 0) {
-    editingAudios.value = [...lastUserMessage.audio];
-  } else {
-    editingAudios.value = [];
-  }
-  
-  // 清空新上傳的媒體
+  // 清空新上傳的圖片
   clearUploadedImages();
-  clearUploadedAudios();
   
   // 聚焦到輸入框
   nextTick(() => {
@@ -785,9 +759,7 @@ function cancelEditMessage() {
   isEditingMessage.value = false;
   userInput.value = '';
   editingImages.value = [];
-  editingAudios.value = [];
   clearUploadedImages();
-  clearUploadedAudios();
 }
 
 // ========== 模型載入 ==========
@@ -924,44 +896,39 @@ async function sendMessage() {
     return;
   }
 
-  // 收集媒體
+  // 停止語音輸入
+  if (isRecording.value && speechRecognition.value) {
+    speechRecognition.value.stop();
+    isRecording.value = false;
+  }
+
+  // 收集圖片
   const currentImages = uploadedImages.value.map(img => img.base64);
-  const currentAudios = uploadedAudios.value.map(audio => audio.base64);
   
   // 決定預設訊息
-  let defaultMessage = '請描述';
-  if (currentImages.length > 0 && currentAudios.length > 0) {
-    defaultMessage = '請描述這些圖片和音訊';
-  } else if (currentImages.length > 0) {
-    defaultMessage = '請描述這張圖片';
-  } else if (currentAudios.length > 0) {
-    defaultMessage = '請描述這段音訊';
-  }
-  
+  const defaultMessage = currentImages.length > 0 ? '請描述這張圖片' : '';
   const userMessage = userInput.value.trim() || defaultMessage;
+  
+  if (!userMessage && currentImages.length === 0) return;
   
   const newMessage: Message = {
     role: 'user',
     content: userMessage,
     timestamp: Date.now(),
-    images: currentImages.length > 0 ? currentImages : undefined,
-    audio: currentAudios.length > 0 ? currentAudios : undefined
+    images: currentImages.length > 0 ? currentImages : undefined
   };
   
   conv.messages.push(newMessage);
   
   // 如果是第一則訊息，用它作為對話標題
   if (conv.messages.length === 1) {
-    let prefix = '';
-    if (currentImages.length > 0) prefix += '📷 ';
-    if (currentAudios.length > 0) prefix += '🎵 ';
+    const prefix = currentImages.length > 0 ? '📷 ' : '';
     const titleText = prefix + userMessage;
     conv.title = titleText.slice(0, 30) + (titleText.length > 30 ? '...' : '');
   }
   
   userInput.value = '';
   clearUploadedImages();
-  clearUploadedAudios();
   isTyping.value = true;
   currentResponse.value = '';
   conv.updatedAt = Date.now();
@@ -978,14 +945,11 @@ async function sendMessage() {
       messagesToSend.push({ role: 'system', content: systemPrompt.value.trim() });
     }
     
-    // 發送 role、content、images 和 audio
+    // 發送 role、content 和 images
     messagesToSend.push(...conv.messages.map(m => {
       const msg: any = { role: m.role, content: m.content };
       if (m.images && m.images.length > 0) {
         msg.images = m.images;
-      }
-      if (m.audio && m.audio.length > 0) {
-        msg.audio = m.audio;
       }
       return msg;
     }));
@@ -1062,36 +1026,27 @@ async function resendEditedMessage(conv: Conversation) {
   // 移除最後一個使用者訊息及其後的所有訊息（包括 AI 回應）
   conv.messages.splice(lastUserIdx);
   
-  // 合併編輯中的媒體和新上傳的媒體
+  // 合併編輯中的圖片和新上傳的圖片
   const allImages = [
     ...editingImages.value,
     ...uploadedImages.value.map(img => img.base64)
   ];
   
-  const allAudios = [
-    ...editingAudios.value,
-    ...uploadedAudios.value.map(audio => audio.base64)
-  ];
-  
   // 決定預設訊息
-  let defaultMessage = '請描述';
-  if (allImages.length > 0 && allAudios.length > 0) {
-    defaultMessage = '請描述這些圖片和音訊';
-  } else if (allImages.length > 0) {
-    defaultMessage = '請描述這張圖片';
-  } else if (allAudios.length > 0) {
-    defaultMessage = '請描述這段音訊';
-  }
-  
+  const defaultMessage = allImages.length > 0 ? '請描述這張圖片' : '';
   const userMessage = userInput.value.trim() || defaultMessage;
+  
+  if (!userMessage && allImages.length === 0) {
+    cancelEditMessage();
+    return;
+  }
   
   // 創建新的使用者訊息
   const newMessage: Message = {
     role: 'user',
     content: userMessage,
     timestamp: Date.now(),
-    images: allImages.length > 0 ? allImages : undefined,
-    audio: allAudios.length > 0 ? allAudios : undefined
+    images: allImages.length > 0 ? allImages : undefined
   };
   
   conv.messages.push(newMessage);
@@ -1099,10 +1054,8 @@ async function resendEditedMessage(conv: Conversation) {
   // 重置編輯狀態
   isEditingMessage.value = false;
   editingImages.value = [];
-  editingAudios.value = [];
   userInput.value = '';
   clearUploadedImages();
-  clearUploadedAudios();
   
   isTyping.value = true;
   currentResponse.value = '';
@@ -1122,9 +1075,6 @@ async function resendEditedMessage(conv: Conversation) {
       const msg: any = { role: m.role, content: m.content };
       if (m.images && m.images.length > 0) {
         msg.images = m.images;
-      }
-      if (m.audio && m.audio.length > 0) {
-        msg.audio = m.audio;
       }
       return msg;
     }));
@@ -1908,28 +1858,6 @@ function clearAllData() {
   border: 2px solid rgba(255,255,255,0.3);
 }
 
-/* 訊息中的音訊 */
-.message-audios {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.message-audio-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  background: #f8f9fa;
-  border-radius: 4px;
-  font-size: 0.85rem;
-}
-
-.message.user .message-audio-item {
-  background: rgba(255, 255, 255, 0.2);
-}
-
 /* 輸入區域 */
 .input-area {
   display: flex;
@@ -1967,6 +1895,43 @@ function clearAllData() {
   color: #533f03;
 }
 
+/* 語音輸入狀態 */
+.speech-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #ffe6e6;
+  border: 1px solid #ff6b6b;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #c92a2a;
+}
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  background: #ff0000;
+  border-radius: 50%;
+  animation: recording-pulse 1s ease-in-out infinite;
+}
+
+@keyframes recording-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.2); }
+}
+
+.upload-btn.recording {
+  background: #ffe6e6;
+  border: 2px solid #ff6b6b;
+  animation: recording-btn-pulse 1s ease-in-out infinite;
+}
+
+@keyframes recording-btn-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(255, 107, 107, 0); }
+}
+
 .input-row {
   display: flex;
   gap: 0.5rem;
@@ -1994,13 +1959,6 @@ function clearAllData() {
   cursor: not-allowed;
 }
 
-/* 媒體預覽區 */
-.media-preview-area {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
 /* 上傳圖片預覽 */
 .uploaded-images-preview {
   display: flex;
@@ -2023,49 +1981,6 @@ function clearAllData() {
   object-fit: cover;
   border-radius: 4px;
   border: 1px solid #ddd;
-}
-
-/* 上傳音訊預覽 */
-.uploaded-audios-preview {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  background: #f0f8ff;
-  border-radius: 4px;
-}
-
-.uploaded-audio-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  background: white;
-  border: 1px solid #b8daff;
-  border-radius: 20px;
-  font-size: 0.85rem;
-  position: relative;
-}
-
-.uploaded-audio-item.editing {
-  border-color: #ffc107;
-  background: #fff9e6;
-}
-
-.audio-icon {
-  font-size: 1rem;
-}
-
-.audio-name {
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.audio-duration {
-  color: #666;
-  font-size: 0.75rem;
 }
 
 .uploaded-image-item.editing img {
