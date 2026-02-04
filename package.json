@@ -1,0 +1,22 @@
+{
+  "name": "ollama-chatbot",
+  "version": "1.0.0",
+  "description": "使用 Ollama 本地模型的 ChatGPT 風格聊天應用",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview",
+    "server": "node server/app.js"
+  },
+  "dependencies": {
+    "marked": "^12.0.0",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "typescript": "^5.4.2",
+    "vite": "^5.1.6",
+    "vue-tsc": "^2.0.6"
+  }
+}
