@@ -4,68 +4,137 @@
     <!-- 側邊欄 -->
     <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-header">
-        <h2 v-if="!sidebarCollapsed">設定</h2>
+        <h2 v-if="!sidebarCollapsed">對話列表</h2>
         <button class="toggle-btn" @click="sidebarCollapsed = !sidebarCollapsed">
           {{ sidebarCollapsed ? '▶' : '◀' }}
         </button>
       </div>
       
       <div class="sidebar-content" v-if="!sidebarCollapsed">
-        <!-- 模型選擇 -->
-        <div class="setting-group">
-          <label>選擇模型</label>
-          <select v-model="selectedModel">
-            <option v-for="model in models" :key="model.name" :value="model.name">
-              {{ model.name }}
-            </option>
-          </select>
-        </div>
+        <!-- 新增對話按鈕 -->
+        <button class="btn-new-chat" @click="createNewConversation">
+          ➕ 新增對話
+        </button>
 
-        <!-- 系統提示詞 -->
-        <div class="setting-group">
-          <label>系統提示詞</label>
-          <textarea
-            v-model="systemPrompt"
-            placeholder="輸入系統提示詞，例如：總是使用繁體中文回應"
-            rows="6"
-          ></textarea>
-          <div class="prompt-actions">
-            <button class="btn-secondary" @click="saveSystemPrompt">儲存</button>
-            <button class="btn-secondary" @click="clearSystemPrompt">清除</button>
+        <!-- 對話歷史列表 -->
+        <div class="conversation-list">
+          <div 
+            v-for="conv in conversations" 
+            :key="conv.id"
+            :class="['conversation-item', { active: conv.id === currentConversationId }]"
+            @click="switchConversation(conv.id)"
+          >
+            <div class="conversation-info">
+              <span class="conversation-title">{{ conv.title }}</span>
+              <span class="conversation-date">{{ formatDate(conv.updatedAt) }}</span>
+            </div>
+            <div class="conversation-actions">
+              <button 
+                class="action-btn edit-btn" 
+                @click.stop="startEditTitle(conv)"
+                title="編輯標題"
+              >✏️</button>
+              <button 
+                class="action-btn delete-btn" 
+                @click.stop="deleteConversation(conv.id)"
+                title="刪除對話"
+              >🗑️</button>
+            </div>
+          </div>
+          
+          <div v-if="conversations.length === 0" class="no-conversations">
+            尚無對話紀錄
           </div>
         </div>
 
-        <!-- 預設提示詞範本 -->
-        <div class="setting-group">
-          <label>快速範本</label>
-          <div class="template-list">
-            <button 
-              v-for="template in promptTemplates" 
-              :key="template.name"
-              class="template-btn"
-              @click="applyTemplate(template.prompt)"
-            >
-              {{ template.name }}
-            </button>
-          </div>
-        </div>
+        <hr class="divider" />
 
-        <!-- 對話管理 -->
-        <div class="setting-group">
-          <label>對話管理</label>
-          <button class="btn-danger" @click="clearChat">清除對話</button>
+        <!-- 設定區塊 -->
+        <div class="settings-section">
+          <h3 class="section-title" @click="settingsExpanded = !settingsExpanded">
+            ⚙️ 設定
+            <span class="expand-icon">{{ settingsExpanded ? '▼' : '▶' }}</span>
+          </h3>
+          
+          <div v-if="settingsExpanded" class="settings-content">
+            <!-- 模型選擇 -->
+            <div class="setting-group">
+              <label>選擇模型</label>
+              <select v-model="selectedModel">
+                <option v-for="model in models" :key="model.name" :value="model.name">
+                  {{ model.name }}
+                </option>
+              </select>
+            </div>
+
+            <!-- 系統提示詞 -->
+            <div class="setting-group">
+              <label>系統提示詞</label>
+              <textarea
+                v-model="systemPrompt"
+                placeholder="輸入系統提示詞，例如：總是使用繁體中文回應"
+                rows="4"
+              ></textarea>
+              <div class="prompt-actions">
+                <button class="btn-secondary" @click="saveSystemPrompt">儲存</button>
+                <button class="btn-secondary" @click="clearSystemPrompt">清除</button>
+              </div>
+            </div>
+
+            <!-- 預設提示詞範本 -->
+            <div class="setting-group">
+              <label>快速範本</label>
+              <div class="template-list">
+                <button 
+                  v-for="template in promptTemplates" 
+                  :key="template.name"
+                  class="template-btn"
+                  @click="applyTemplate(template.prompt)"
+                >
+                  {{ template.name }}
+                </button>
+              </div>
+            </div>
+
+            <!-- 資料管理 -->
+            <div class="setting-group">
+              <label>資料管理</label>
+              <button class="btn-danger" @click="clearAllData">清除所有資料</button>
+            </div>
+          </div>
         </div>
       </div>
     </aside>
 
+    <!-- 編輯標題對話框 -->
+    <div v-if="editingConversation" class="modal-overlay" @click="cancelEditTitle">
+      <div class="modal" @click.stop>
+        <h3>編輯對話標題</h3>
+        <input 
+          v-model="editingTitle" 
+          @keydown.enter="saveEditTitle"
+          @keydown.escape="cancelEditTitle"
+          ref="editTitleInput"
+          placeholder="輸入新標題"
+        />
+        <div class="modal-actions">
+          <button class="btn-secondary" @click="cancelEditTitle">取消</button>
+          <button class="btn-primary" @click="saveEditTitle">儲存</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 主聊天區域 -->
     <main class="chat-container">
       <div class="header">
-        <h1>本地 AI 助手</h1>
+        <h1>{{ currentConversation?.title || '本地 AI 助手' }}</h1>
         <div class="header-info">
           <span class="model-badge" v-if="selectedModel">{{ selectedModel }}</span>
           <span class="system-prompt-indicator" v-if="systemPrompt" title="系統提示詞已啟用">
             📝 系統提示詞已設定
+          </span>
+          <span class="message-count" v-if="messages.length > 0">
+            {{ messages.length }} 則訊息
           </span>
         </div>
       </div>
@@ -91,6 +160,7 @@
           <div class="content">
             <div class="message-header">
               <span class="role-label">{{ msg.role === 'user' ? '你' : 'AI' }}</span>
+              <span class="message-time" v-if="msg.timestamp">{{ formatTime(msg.timestamp) }}</span>
             </div>
             <div class="message-body" v-html="formatMarkdown(msg.content)"></div>
           </div>
@@ -124,26 +194,50 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue';
+import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import { marked } from 'marked';
 
+// 介面定義
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  timestamp?: number;
 }
 
+interface Conversation {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+  model?: string;
+  systemPrompt?: string;
+}
+
+// 常數
 const API_BASE = '/api';
+const STORAGE_KEY = 'chatbot_conversations';
+const CURRENT_CONV_KEY = 'chatbot_current_conversation';
+
+// 狀態
 const selectedModel = ref('deepseek-r1:8b');
 const models = ref<any[]>([]);
-const messages = ref<Message[]>([]);
 const userInput = ref('');
 const isTyping = ref(false);
 const currentResponse = ref('');
 const messagesContainer = ref<HTMLElement>();
 const sidebarCollapsed = ref(false);
-
-// 系統提示詞
+const settingsExpanded = ref(false);
 const systemPrompt = ref('');
+
+// 對話管理狀態
+const conversations = ref<Conversation[]>([]);
+const currentConversationId = ref<string | null>(null);
+
+// 編輯標題狀態
+const editingConversation = ref<Conversation | null>(null);
+const editingTitle = ref('');
+const editTitleInput = ref<HTMLInputElement>();
 
 // 預設提示詞範本
 const promptTemplates = [
@@ -155,28 +249,80 @@ const promptTemplates = [
   { name: '學習導師', prompt: '你是一位耐心的學習導師，請用淺顯易懂的方式解釋概念，適時提問以確認理解。使用繁體中文。' },
 ];
 
-onMounted(async () => {
-  await loadModels();
-  loadSavedSettings();
+// 計算屬性
+const currentConversation = computed(() => {
+  return conversations.value.find(c => c.id === currentConversationId.value) || null;
 });
 
-// 載入儲存的設定
-function loadSavedSettings() {
+const messages = computed(() => {
+  return currentConversation.value?.messages || [];
+});
+
+// 生命週期
+onMounted(async () => {
+  await loadModels();
+  loadSavedData();
+});
+
+// 監聽模型變更
+watch(selectedModel, (newModel) => {
+  localStorage.setItem('selectedModel', newModel);
+  if (currentConversation.value) {
+    currentConversation.value.model = newModel;
+    saveConversations();
+  }
+});
+
+// ========== 資料載入與儲存 ==========
+
+function loadSavedData() {
+  // 載入對話列表
+  const savedConversations = localStorage.getItem(STORAGE_KEY);
+  if (savedConversations) {
+    try {
+      conversations.value = JSON.parse(savedConversations);
+      // 按更新時間排序（最新的在前）
+      conversations.value.sort((a, b) => b.updatedAt - a.updatedAt);
+    } catch (e) {
+      console.error('載入對話失敗:', e);
+      conversations.value = [];
+    }
+  }
+
+  // 載入當前對話 ID
+  const savedCurrentId = localStorage.getItem(CURRENT_CONV_KEY);
+  if (savedCurrentId && conversations.value.some(c => c.id === savedCurrentId)) {
+    currentConversationId.value = savedCurrentId;
+  } else if (conversations.value.length > 0) {
+    currentConversationId.value = conversations.value[0].id;
+  }
+
+  // 載入系統提示詞
   const savedPrompt = localStorage.getItem('systemPrompt');
-  const savedModel = localStorage.getItem('selectedModel');
-  
   if (savedPrompt) {
     systemPrompt.value = savedPrompt;
   }
+
+  // 載入模型選擇
+  const savedModel = localStorage.getItem('selectedModel');
   if (savedModel) {
     selectedModel.value = savedModel;
   }
 }
 
-// 監聽模型變更並儲存
-watch(selectedModel, (newModel) => {
-  localStorage.setItem('selectedModel', newModel);
-});
+function saveConversations() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations.value));
+}
+
+function saveCurrentConversationId() {
+  if (currentConversationId.value) {
+    localStorage.setItem(CURRENT_CONV_KEY, currentConversationId.value);
+  } else {
+    localStorage.removeItem(CURRENT_CONV_KEY);
+  }
+}
+
+// ========== 模型載入 ==========
 
 async function loadModels() {
   try {
@@ -184,7 +330,6 @@ async function loadModels() {
     const data = await response.json();
     models.value = data.models || [];
     
-    // 如果儲存的模型不在列表中，使用第一個可用模型
     if (models.value.length > 0) {
       const savedModel = localStorage.getItem('selectedModel');
       const modelExists = models.value.some(m => m.name === savedModel);
@@ -197,26 +342,129 @@ async function loadModels() {
   }
 }
 
+// ========== 對話管理 ==========
+
+function generateId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2);
+}
+
+function createNewConversation() {
+  const newConversation: Conversation = {
+    id: generateId(),
+    title: '新對話',
+    messages: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    model: selectedModel.value,
+    systemPrompt: systemPrompt.value
+  };
+  
+  conversations.value.unshift(newConversation);
+  currentConversationId.value = newConversation.id;
+  
+  saveConversations();
+  saveCurrentConversationId();
+}
+
+function switchConversation(id: string) {
+  currentConversationId.value = id;
+  saveCurrentConversationId();
+  
+  // 載入對話的模型設定
+  const conv = conversations.value.find(c => c.id === id);
+  if (conv?.model) {
+    selectedModel.value = conv.model;
+  }
+}
+
+function deleteConversation(id: string) {
+  if (!confirm('確定要刪除這個對話嗎？')) return;
+  
+  const index = conversations.value.findIndex(c => c.id === id);
+  if (index !== -1) {
+    conversations.value.splice(index, 1);
+    
+    // 如果刪除的是當前對話，切換到第一個對話或清空
+    if (currentConversationId.value === id) {
+      currentConversationId.value = conversations.value[0]?.id || null;
+    }
+    
+    saveConversations();
+    saveCurrentConversationId();
+  }
+}
+
+// ========== 標題編輯 ==========
+
+function startEditTitle(conv: Conversation) {
+  editingConversation.value = conv;
+  editingTitle.value = conv.title;
+  nextTick(() => {
+    editTitleInput.value?.focus();
+    editTitleInput.value?.select();
+  });
+}
+
+function saveEditTitle() {
+  if (editingConversation.value && editingTitle.value.trim()) {
+    editingConversation.value.title = editingTitle.value.trim();
+    editingConversation.value.updatedAt = Date.now();
+    saveConversations();
+  }
+  cancelEditTitle();
+}
+
+function cancelEditTitle() {
+  editingConversation.value = null;
+  editingTitle.value = '';
+}
+
+// ========== 訊息發送 ==========
+
 async function sendMessage() {
   if (!userInput.value.trim() || isTyping.value) return;
 
+  // 如果沒有當前對話，創建一個新的
+  if (!currentConversationId.value) {
+    createNewConversation();
+  }
+
+  const conv = currentConversation.value;
+  if (!conv) return;
+
   const userMessage = userInput.value.trim();
-  messages.value.push({ role: 'user', content: userMessage });
+  const newMessage: Message = {
+    role: 'user',
+    content: userMessage,
+    timestamp: Date.now()
+  };
+  
+  conv.messages.push(newMessage);
+  
+  // 如果是第一則訊息，用它作為對話標題
+  if (conv.messages.length === 1) {
+    conv.title = userMessage.slice(0, 30) + (userMessage.length > 30 ? '...' : '');
+  }
+  
   userInput.value = '';
   isTyping.value = true;
   currentResponse.value = '';
+  conv.updatedAt = Date.now();
+  
+  // 重新排序對話列表
+  conversations.value.sort((a, b) => b.updatedAt - a.updatedAt);
+  saveConversations();
 
   try {
-    // 構建要發送的訊息，包含系統提示詞
+    // 構建要發送的訊息
     const messagesToSend: Message[] = [];
     
-    // 如果有系統提示詞，加在最前面
     if (systemPrompt.value.trim()) {
       messagesToSend.push({ role: 'system', content: systemPrompt.value.trim() });
     }
     
-    // 加入對話歷史
-    messagesToSend.push(...messages.value);
+    // 只發送 role 和 content
+    messagesToSend.push(...conv.messages.map(m => ({ role: m.role, content: m.content })));
 
     const response = await fetch(`${API_BASE}/chat`, {
       method: 'POST',
@@ -249,15 +497,29 @@ async function sendMessage() {
       }
     }
 
-    messages.value.push({ role: 'assistant', content: currentResponse.value });
+    const assistantMessage: Message = {
+      role: 'assistant',
+      content: currentResponse.value,
+      timestamp: Date.now()
+    };
+    conv.messages.push(assistantMessage);
     currentResponse.value = '';
+    
   } catch (error) {
     console.error('發送訊息失敗:', error);
-    messages.value.push({ role: 'assistant', content: '抱歉，發生錯誤，請稍後再試。' });
+    conv.messages.push({
+      role: 'assistant',
+      content: '抱歉，發生錯誤，請稍後再試。',
+      timestamp: Date.now()
+    });
   } finally {
     isTyping.value = false;
+    conv.updatedAt = Date.now();
+    saveConversations();
   }
 }
+
+// ========== 工具函式 ==========
 
 function formatMarkdown(text: string) {
   return marked(text);
@@ -270,9 +532,37 @@ async function scrollToBottom() {
   }
 }
 
-// 系統提示詞相關功能
+function formatDate(timestamp: number): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+  
+  if (diffDays === 0) {
+    return '今天';
+  } else if (diffDays === 1) {
+    return '昨天';
+  } else if (diffDays < 7) {
+    return `${diffDays} 天前`;
+  } else {
+    return date.toLocaleDateString('zh-TW');
+  }
+}
+
+function formatTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString('zh-TW', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+// ========== 系統提示詞 ==========
+
 function saveSystemPrompt() {
   localStorage.setItem('systemPrompt', systemPrompt.value);
+  if (currentConversation.value) {
+    currentConversation.value.systemPrompt = systemPrompt.value;
+    saveConversations();
+  }
   alert('系統提示詞已儲存！');
 }
 
@@ -285,10 +575,20 @@ function applyTemplate(prompt: string) {
   systemPrompt.value = prompt;
 }
 
-function clearChat() {
-  if (confirm('確定要清除所有對話嗎？')) {
-    messages.value = [];
-  }
+// ========== 資料清除 ==========
+
+function clearAllData() {
+  if (!confirm('確定要清除所有對話和設定嗎？此操作無法復原。')) return;
+  
+  conversations.value = [];
+  currentConversationId.value = null;
+  systemPrompt.value = '';
+  
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(CURRENT_CONV_KEY);
+  localStorage.removeItem('systemPrompt');
+  
+  alert('所有資料已清除！');
 }
 </script>
 
@@ -302,8 +602,8 @@ function clearChat() {
 /* 側邊欄樣式 */
 .sidebar {
   width: 300px;
-  background: white;
-  border-right: 1px solid #e0e0e0;
+  background: #1a1a2e;
+  color: white;
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
@@ -318,12 +618,13 @@ function clearChat() {
   justify-content: space-between;
   align-items: center;
   padding: 1rem;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid #333;
 }
 
 .sidebar-header h2 {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
+  font-weight: 500;
 }
 
 .toggle-btn {
@@ -332,43 +633,186 @@ function clearChat() {
   cursor: pointer;
   font-size: 1rem;
   padding: 0.5rem;
-  color: #666;
+  color: #888;
 }
 
 .toggle-btn:hover {
-  color: #007bff;
+  color: white;
 }
 
 .sidebar-content {
   flex: 1;
   overflow-y: auto;
   padding: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 新增對話按鈕 */
+.btn-new-chat {
+  width: 100%;
+  padding: 0.75rem;
+  background: #16213e;
+  color: white;
+  border: 1px dashed #444;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+  transition: all 0.2s;
+}
+
+.btn-new-chat:hover {
+  background: #1f3460;
+  border-color: #007bff;
+}
+
+/* 對話列表 */
+.conversation-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.conversation-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+  transition: background 0.2s;
+}
+
+.conversation-item:hover {
+  background: #16213e;
+}
+
+.conversation-item.active {
+  background: #1f3460;
+  border-left: 3px solid #007bff;
+}
+
+.conversation-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.conversation-title {
+  display: block;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 0.25rem;
+}
+
+.conversation-date {
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.conversation-actions {
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.conversation-item:hover .conversation-actions {
+  opacity: 1;
+}
+
+.action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  font-size: 0.8rem;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.action-btn:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+.no-conversations {
+  text-align: center;
+  color: #666;
+  padding: 2rem;
+  font-size: 0.9rem;
+}
+
+/* 分隔線 */
+.divider {
+  border: none;
+  border-top: 1px solid #333;
+  margin: 1rem 0;
+}
+
+/* 設定區塊 */
+.settings-section {
+  margin-top: auto;
+}
+
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 4px;
+  margin: 0;
+}
+
+.section-title:hover {
+  background: #16213e;
+}
+
+.expand-icon {
+  font-size: 0.7rem;
+  color: #888;
+}
+
+.settings-content {
+  padding-top: 0.5rem;
 }
 
 .setting-group {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .setting-group label {
   display: block;
-  font-weight: 600;
+  font-size: 0.8rem;
+  color: #aaa;
   margin-bottom: 0.5rem;
-  color: #333;
 }
 
 .setting-group select,
 .setting-group textarea {
   width: 100%;
   padding: 0.5rem;
-  border: 1px solid #ddd;
+  background: #16213e;
+  border: 1px solid #333;
   border-radius: 4px;
+  color: white;
   font-family: inherit;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+}
+
+.setting-group select:focus,
+.setting-group textarea:focus {
+  outline: none;
+  border-color: #007bff;
 }
 
 .setting-group textarea {
   resize: vertical;
-  min-height: 100px;
+  min-height: 80px;
 }
 
 .prompt-actions {
@@ -379,17 +823,17 @@ function clearChat() {
 
 .btn-secondary {
   flex: 1;
-  padding: 0.5rem;
-  background: #6c757d;
+  padding: 0.4rem;
+  background: #333;
   color: white;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
 }
 
 .btn-secondary:hover {
-  background: #5a6268;
+  background: #444;
 }
 
 .btn-danger {
@@ -400,6 +844,7 @@ function clearChat() {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  font-size: 0.85rem;
 }
 
 .btn-danger:hover {
@@ -409,23 +854,83 @@ function clearChat() {
 .template-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
 .template-btn {
-  padding: 0.4rem 0.8rem;
-  background: #e9ecef;
-  border: 1px solid #dee2e6;
-  border-radius: 20px;
+  padding: 0.3rem 0.6rem;
+  background: #333;
+  border: none;
+  border-radius: 12px;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
+  color: #ccc;
   transition: all 0.2s;
 }
 
 .template-btn:hover {
   background: #007bff;
   color: white;
+}
+
+/* 對話框 Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 400px;
+}
+
+.modal h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+}
+
+.modal input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+  margin-bottom: 1rem;
+}
+
+.modal input:focus {
+  outline: none;
   border-color: #007bff;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.btn-primary {
+  padding: 0.5rem 1rem;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-primary:hover {
+  background: #0056b3;
 }
 
 /* 主聊天區域 */
@@ -433,8 +938,6 @@ function clearChat() {
   flex: 1;
   display: flex;
   flex-direction: column;
-  max-width: 1000px;
-  margin: 0 auto;
   background: #f5f5f5;
 }
 
@@ -449,26 +952,37 @@ function clearChat() {
 
 .header h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: 1.3rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
 }
 
 .header-info {
   display: flex;
   align-items: center;
   gap: 1rem;
+  flex-shrink: 0;
 }
 
 .model-badge {
   background: #e9ecef;
   padding: 0.3rem 0.8rem;
   border-radius: 20px;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: #495057;
 }
 
 .system-prompt-indicator {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: #28a745;
+}
+
+.message-count {
+  font-size: 0.8rem;
+  color: #888;
 }
 
 .messages {
@@ -553,6 +1067,11 @@ function clearChat() {
   color: #666;
 }
 
+.message-time {
+  font-size: 0.75rem;
+  color: #999;
+}
+
 .typing-indicator {
   font-size: 0.8rem;
   color: #999;
@@ -596,6 +1115,10 @@ function clearChat() {
   color: rgba(255,255,255,0.8);
 }
 
+.message.user .message-time {
+  color: rgba(255,255,255,0.6);
+}
+
 .input-area {
   display: flex;
   gap: 1rem;
@@ -604,7 +1127,7 @@ function clearChat() {
   border-top: 1px solid #e0e0e0;
 }
 
-textarea {
+.input-area textarea {
   flex: 1;
   padding: 0.75rem;
   border: 1px solid #ddd;
@@ -612,14 +1135,16 @@ textarea {
   resize: none;
   font-family: inherit;
   min-height: 60px;
+  background: white;
+  color: #333;
 }
 
-textarea:focus {
+.input-area textarea:focus {
   outline: none;
   border-color: #007bff;
 }
 
-button {
+.input-area button {
   padding: 0.75rem 2rem;
   background: #007bff;
   color: white;
@@ -629,11 +1154,11 @@ button {
   transition: background 0.2s;
 }
 
-button:hover:not(:disabled) {
+.input-area button:hover:not(:disabled) {
   background: #0056b3;
 }
 
-button:disabled {
+.input-area button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -646,7 +1171,7 @@ button:disabled {
     top: 0;
     height: 100%;
     z-index: 100;
-    box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+    box-shadow: 2px 0 10px rgba(0,0,0,0.3);
   }
   
   .sidebar.collapsed {
@@ -657,6 +1182,11 @@ button:disabled {
   
   .chat-container {
     width: 100%;
+  }
+  
+  .header h1 {
+    max-width: 200px;
+    font-size: 1.1rem;
   }
 }
 </style>
