@@ -14,14 +14,19 @@
 ```
 App.vue
 ├── 側邊欄 (Sidebar)
-│   ├── 模型選擇
+│   ├── 新增對話按鈕
+│   ├── 對話列表（可編輯標題、刪除）
 │   ├── 系統提示詞設定
-│   ├── 快速範本
-│   └── 對話管理
+│   └── 快速範本
 └── 主聊天區域 (Chat Container)
-    ├── 標題列
-    ├── 訊息區域
+    ├── 標題列（模型選擇下拉選單）
+    ├── 訊息區域（含圖片預覽、編輯按鈕）
     └── 輸入區域
+        ├── 圖片上傳按鈕 📷
+        ├── 語音輸入按鈕 🎤
+        ├── 音檔上傳按鈕 📁
+        ├── 文字輸入框
+        └── 發送按鈕
 ```
 
 ## 核心狀態
@@ -31,8 +36,11 @@ App.vue
 const selectedModel = ref('deepseek-r1:8b');  // 選擇的模型
 const models = ref<any[]>([]);                 // 可用模型列表
 
+// 對話管理
+const conversations = ref<Conversation[]>([]); // 所有對話
+const currentConversationId = ref<string | null>(null);
+
 // 訊息相關
-const messages = ref<Message[]>([]);           // 對話歷史
 const userInput = ref('');                     // 使用者輸入
 const currentResponse = ref('');               // AI 正在輸出的回應
 const isTyping = ref(false);                   // AI 是否正在回應
@@ -40,9 +48,25 @@ const isTyping = ref(false);                   // AI 是否正在回應
 // UI 相關
 const sidebarCollapsed = ref(false);           // 側邊欄是否收合
 const messagesContainer = ref<HTMLElement>();  // 訊息容器 DOM 參考
+const showModelDropdown = ref(false);          // 模型下拉選單
 
 // 系統提示詞
 const systemPrompt = ref('');                  // 系統提示詞內容
+
+// 圖片上傳
+const uploadedImages = ref<UploadedImage[]>([]); // 待上傳的圖片
+
+// 編輯訊息
+const isEditingMessage = ref(false);           // 是否正在編輯訊息
+const editingImages = ref<string[]>([]);       // 編輯中保留的圖片
+
+// 語音輸入
+const isRecording = ref(false);                // 是否正在錄音
+const speechRecognition = ref<any>(null);      // 語音識別實例
+const speechSupported = ref(false);            // 瀏覽器是否支援
+
+// 音檔轉錄
+const isTranscribing = ref(false);             // 是否正在轉錄
 ```
 
 ## 訊息介面定義
@@ -51,6 +75,24 @@ const systemPrompt = ref('');                  // 系統提示詞內容
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  timestamp?: number;        // 訊息時間戳
+  images?: string[];         // base64 編碼的圖片
+}
+
+interface Conversation {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+  model: string;
+  systemPrompt: string;
+}
+
+interface UploadedImage {
+  file: File;
+  preview: string;           // URL.createObjectURL
+  base64: string;
 }
 ```
 
@@ -207,6 +249,136 @@ const promptTemplates = [
   { name: '友善助手', prompt: '你是一位友善且有耐心的助手，請用輕鬆的語氣回應。使用繁體中文。' },
   { name: '學習導師', prompt: '你是一位耐心的學習導師，請用淺顯易懂的方式解釋概念，適時提問以確認理解。使用繁體中文。' },
 ];
+```
+
+### 6. 圖片上傳
+
+```typescript
+async function addImage(file: File) {
+  // 限制最多 4 張圖片
+  if (uploadedImages.value.length >= 4) {
+    alert('最多只能上傳 4 張圖片');
+    return;
+  }
+  
+  // 限制檔案大小 (10MB)
+  if (file.size > 10 * 1024 * 1024) {
+    alert('圖片大小不能超過 10MB');
+    return;
+  }
+  
+  const base64 = await fileToBase64(file);
+  const preview = URL.createObjectURL(file);
+  
+  uploadedImages.value.push({ file, preview, base64 });
+}
+```
+
+### 7. 語音輸入（Web Speech API）
+
+```typescript
+function initSpeechRecognition() {
+  const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+  
+  if (!SpeechRecognitionAPI) {
+    speechSupported.value = false;
+    return;
+  }
+  
+  speechSupported.value = true;
+  const recognition = new SpeechRecognitionAPI();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'zh-TW'; // 繁體中文
+  
+  recognition.onresult = (event) => {
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      if (event.results[i].isFinal) {
+        userInput.value += event.results[i][0].transcript;
+      }
+    }
+  };
+  
+  speechRecognition.value = recognition;
+}
+
+function toggleSpeechRecognition() {
+  if (isRecording.value) {
+    speechRecognition.value.stop();
+    isRecording.value = false;
+  } else {
+    speechRecognition.value.start();
+    isRecording.value = true;
+  }
+}
+```
+
+### 8. 音檔上傳轉錄
+
+```typescript
+async function handleAudioUpload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (!input.files || input.files.length === 0) return;
+  
+  const file = input.files[0];
+  isTranscribing.value = true;
+  
+  try {
+    const formData = new FormData();
+    formData.append('audio', file);
+    
+    const response = await fetch(`${API_BASE}/transcribe`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    const data = await response.json();
+    
+    if (data.text) {
+      userInput.value += data.text;
+    }
+  } catch (error) {
+    alert('音檔轉錄失敗');
+  } finally {
+    isTranscribing.value = false;
+  }
+}
+```
+
+### 9. 編輯並重新發送訊息
+
+```typescript
+function editLastMessage() {
+  const conv = currentConversation.value;
+  if (!conv) return;
+  
+  // 找到最後一個使用者訊息
+  let lastUserIdx = -1;
+  for (let i = conv.messages.length - 1; i >= 0; i--) {
+    if (conv.messages[i].role === 'user') {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  
+  if (lastUserIdx === -1) return;
+  
+  const lastUserMessage = conv.messages[lastUserIdx];
+  
+  // 設定編輯狀態
+  isEditingMessage.value = true;
+  userInput.value = lastUserMessage.content;
+  
+  // 保留原有圖片
+  if (lastUserMessage.images?.length > 0) {
+    editingImages.value = [...lastUserMessage.images];
+  }
+}
+
+async function resendEditedMessage(conv: Conversation) {
+  // 移除最後一個使用者訊息及其後的 AI 回應
+  // 重新發送編輯後的訊息
+}
 ```
 
 ## 樣式設計

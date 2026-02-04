@@ -3,14 +3,16 @@
 ## 基本資訊
 
 - **Base URL**: `http://localhost:3001/api`
-- **內容類型**: `application/json`
+- **內容類型**: `application/json`（除音檔上傳外）
 
 ## 端點列表
 
 | 方法 | 端點 | 說明 |
 |------|------|------|
 | GET | `/api/models` | 取得可用模型列表 |
-| POST | `/api/chat` | 發送聊天訊息 |
+| POST | `/api/chat` | 發送聊天訊息（支援圖片多模態） |
+| POST | `/api/transcribe` | 音檔轉文字 |
+| GET | `/api/audio-models` | 檢查音訊模型是否可用 |
 
 ---
 
@@ -118,6 +120,23 @@
 |------|------|------|
 | `role` | string | 角色：`system`、`user` 或 `assistant` |
 | `content` | string | 訊息內容 |
+| `images` | string[] | （選填）base64 編碼的圖片陣列 |
+
+### 圖片多模態範例
+
+```json
+{
+  "model": "qwen3-vl:8b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "請描述這張圖片",
+      "images": ["iVBORw0KGgoAAAANSUhEUgAA..."]
+    }
+  ],
+  "stream": true
+}
+```
 
 ### 角色說明
 
@@ -254,9 +273,67 @@ curl -X POST http://localhost:3001/api/chat \
 
 ---
 
+## POST /api/transcribe
+
+上傳音檔並轉換為文字。
+
+### 請求
+
+- **Content-Type**: `multipart/form-data`
+
+| 欄位 | 類型 | 必填 | 說明 |
+|------|------|------|------|
+| `audio` | file | 是 | 音訊檔案（MP3、WAV、M4A 等） |
+| `model` | string | 否 | 指定模型（預設：whisper） |
+
+### 回應
+
+```json
+{
+  "text": "轉錄的文字內容",
+  "model": "whisper"
+}
+```
+
+### 錯誤回應
+
+```json
+{
+  "error": "音訊轉錄服務不可用",
+  "detail": "本地 Ollama 未安裝支援音訊的模型",
+  "suggestion": "請安裝音訊模型：ollama pull whisper"
+}
+```
+
+### cURL 範例
+
+```bash
+curl -X POST http://localhost:3001/api/transcribe \
+  -F "audio=@recording.mp3"
+```
+
+---
+
+## GET /api/audio-models
+
+檢查本地 Ollama 是否安裝了支援音訊的模型。
+
+### 回應
+
+```json
+{
+  "available": true,
+  "models": ["whisper:latest", "qwen2-audio:latest"]
+}
+```
+
+---
+
 ## 狀態碼
 
 | 狀態碼 | 說明 |
 |--------|------|
 | 200 | 成功 |
+| 400 | 請求錯誤（如未提供音檔） |
 | 500 | 伺服器錯誤（Ollama 服務問題、模型不存在等） |
+| 503 | 服務不可用（如音訊模型未安裝） |

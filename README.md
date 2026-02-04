@@ -4,10 +4,27 @@
 
 ## 功能特色
 
+### 核心功能
 - 支援串流回應，即時顯示 AI 回覆
 - 自動載入 Ollama 已安裝的模型
 - 支援 Markdown 格式渲染
 - 現代化的聊天介面
+- 系統提示詞設定與快速範本
+
+### 對話管理
+- 新增、切換、刪除對話
+- 對話歷史自動儲存至 localStorage
+- 對話標題編輯
+- 即時切換模型
+
+### 多模態支援
+- **圖片上傳** 📷 - 支援視覺模型（如 qwen3-vl）分析圖片
+- **語音輸入** 🎤 - 瀏覽器即時語音轉文字
+- **音檔轉錄** 📁 - 上傳音檔自動轉為文字
+
+### 訊息編輯
+- 編輯最後一則訊息並重新發送
+- 編輯時保留原有圖片
 
 ## 系統需求
 
@@ -96,18 +113,31 @@ npm run dev
 | 方法 | 端點 | 說明 |
 |------|------|------|
 | GET | `/api/models` | 取得可用模型列表 |
-| POST | `/api/chat` | 發送聊天訊息 |
+| POST | `/api/chat` | 發送聊天訊息（支援圖片） |
+| POST | `/api/transcribe` | 音檔轉文字 |
+| GET | `/api/audio-models` | 檢查音訊模型是否可用 |
 
 ### 聊天 API 請求範例
 
 ```json
 {
-  "model": "qwen2.5:7b",
+  "model": "qwen3-vl:8b",
   "messages": [
-    { "role": "user", "content": "你好！" }
+    { 
+      "role": "user", 
+      "content": "描述這張圖片",
+      "images": ["base64編碼的圖片..."]
+    }
   ],
   "stream": true
 }
+```
+
+### 音檔轉錄
+
+```bash
+curl -X POST http://localhost:3001/api/transcribe \
+  -F "audio=@recording.mp3"
 ```
 
 ## 生產環境部署
@@ -122,6 +152,30 @@ npm start
 ```
 
 建置後的檔案會在 `dist/` 目錄，可以使用 nginx 或其他網頁伺服器提供服務。
+
+## 多模態功能說明
+
+### 圖片上傳
+點擊輸入框旁的 📷 按鈕上傳圖片，支援的視覺模型包括：
+- `qwen3-vl` - Qwen 視覺語言模型
+- `llava` - LLaVA 視覺模型
+- 其他支援圖片的多模態模型
+
+### 語音輸入
+點擊 🎤 按鈕開始即時語音輸入（使用瀏覽器 Web Speech API）：
+- 支援 Chrome、Edge、Safari 等現代瀏覽器
+- 預設識別繁體中文
+- 無需安裝額外模型
+
+### 音檔轉錄
+點擊 📁 按鈕上傳音檔轉文字：
+- 支援 MP3、WAV、M4A 等常見格式
+- 需要安裝音訊模型：`ollama pull whisper`
+- 最大檔案大小：25MB
+
+> **注意**：Ollama 目前不直接支援音訊多模態輸入（[Issue #6367](https://github.com/ollama/ollama/issues/6367)），
+> 本專案採用與 [Open WebUI](https://github.com/open-webui/open-webui) 相同的策略，
+> 先使用 STT 服務將音訊轉為文字再發送給 LLM。
 
 ## 授權
 
