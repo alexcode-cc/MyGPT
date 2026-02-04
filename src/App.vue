@@ -255,6 +255,12 @@
           <span>正在聆聽... 說完後點擊麥克風停止</span>
         </div>
         
+        <!-- 音檔轉錄狀態 -->
+        <div v-if="isTranscribing" class="transcribing-indicator">
+          <span class="transcribing-spinner">🔄</span>
+          <span>正在轉錄音檔（faster-whisper）... 請稍候</span>
+        </div>
+        
         <div class="input-row">
           <!-- 上傳圖片按鈕 -->
           <input
@@ -283,6 +289,24 @@
             :title="speechSupported ? (isRecording ? '停止語音輸入' : '語音輸入（點擊開始說話）') : '您的瀏覽器不支援語音輸入'"
           >
             {{ isRecording ? '🔴' : '🎤' }}
+          </button>
+          
+          <!-- 上傳音檔按鈕 -->
+          <input
+            type="file"
+            ref="audioInput"
+            accept="audio/*"
+            @change="handleAudioUpload"
+            style="display: none"
+          />
+          <button 
+            class="upload-btn"
+            :class="{ 'transcribing': isTranscribing }"
+            @click="triggerAudioUpload"
+            :disabled="isTyping || isTranscribing"
+            title="上傳音檔轉文字（支援 MP3、WAV 等格式，使用 faster-whisper）"
+          >
+            {{ isTranscribing ? '⏳' : '📁' }}
           </button>
           
           <textarea
@@ -408,6 +432,11 @@ const isRecording = ref(false);
 const speechRecognition = ref<any>(null);
 const speechSupported = ref(false);
 
+// 音檔轉錄狀態
+const isTranscribing = ref(false);
+const audioInput = ref<HTMLInputElement>();
+const whisperAvailable = ref(false);
+
 // 預設提示詞範本
 const promptTemplates = [
   { name: '繁體中文', prompt: '請總是使用繁體中文回應所有訊息。' },
@@ -450,6 +479,7 @@ onMounted(async () => {
   await loadModels();
   loadSavedData();
   initSpeechRecognition();
+  checkWhisperStatus();
 });
 
 // 監聽模型變更
@@ -652,6 +682,95 @@ function toggleSpeechRecognition() {
       console.error('無法啟動語音識別:', e);
       alert('無法啟動語音識別，請檢查麥克風權限');
     }
+  }
+}
+
+// ========== 音檔上傳轉錄 (faster-whisper) ==========
+
+function triggerAudioUpload() {
+  audioInput.value?.click();
+}
+
+async function handleAudioUpload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (!input.files || input.files.length === 0) return;
+  
+  const file = input.files[0];
+  
+  // 檢查是否為音檔
+  if (!file.type.startsWith('audio/')) {
+    alert('請選擇音訊檔案');
+    input.value = '';
+    return;
+  }
+  
+  // 檢查檔案大小 (50MB)
+  if (file.size > 50 * 1024 * 1024) {
+    alert('音檔大小不能超過 50MB');
+    input.value = '';
+    return;
+  }
+  
+  isTranscribing.value = true;
+  
+  try {
+    const formData = new FormData();
+    formData.append('audio', file);
+    
+    const response = await fetch(`${API_BASE}/transcribe`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || errorData.error || '轉錄失敗');
+    }
+    
+    const data = await response.json();
+    
+    if (data.text) {
+      // 將轉錄結果加入輸入框
+      if (userInput.value) {
+        userInput.value += '\n' + data.text;
+      } else {
+        userInput.value = data.text;
+      }
+      
+      // 顯示轉錄資訊
+      console.log(`轉錄完成: 語言=${data.language}, 時長=${data.duration}秒`);
+      
+      // 聚焦輸入框
+      nextTick(() => {
+        messageInput.value?.focus();
+      });
+    } else {
+      alert('未能識別音訊內容');
+    }
+  } catch (error: any) {
+    console.error('音檔轉錄失敗:', error);
+    
+    if (error.message.includes('Whisper 服務未啟動')) {
+      alert('Whisper 服務未啟動\n\n請先啟動 whisper-server：\ncd whisper-server && ./start.sh');
+    } else {
+      alert(`音檔轉錄失敗: ${error.message}`);
+    }
+  } finally {
+    isTranscribing.value = false;
+    input.value = '';
+  }
+}
+
+// 檢查 Whisper 服務狀態
+async function checkWhisperStatus() {
+  try {
+    const response = await fetch(`${API_BASE}/whisper/health`);
+    const data = await response.json();
+    whisperAvailable.value = data.available;
+    console.log('Whisper 服務狀態:', data);
+  } catch (error) {
+    whisperAvailable.value = false;
+    console.log('Whisper 服務不可用');
   }
 }
 
@@ -1930,6 +2049,35 @@ function clearAllData() {
 @keyframes recording-btn-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.4); }
   50% { box-shadow: 0 0 0 8px rgba(255, 107, 107, 0); }
+}
+
+/* 音檔轉錄狀態 */
+.transcribing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #e7f5ff;
+  border: 1px solid #74c0fc;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #1971c2;
+}
+
+.transcribing-spinner {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.upload-btn.transcribing {
+  background: #e7f5ff;
+  border: 2px solid #74c0fc;
+  cursor: wait;
 }
 
 .input-row {

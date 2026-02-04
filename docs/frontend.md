@@ -24,6 +24,7 @@ App.vue
     └── 輸入區域
         ├── 圖片上傳按鈕 📷（支援視覺模型）
         ├── 語音輸入按鈕 🎤（Web Speech API）
+        ├── 音檔上傳按鈕 📁（faster-whisper）
         ├── 文字輸入框
         └── 發送按鈕
 ```
@@ -63,9 +64,12 @@ const editingImages = ref<string[]>([]);       // 編輯中保留的圖片
 const isRecording = ref(false);                // 是否正在錄音
 const speechRecognition = ref<any>(null);      // 語音識別實例
 const speechSupported = ref(false);            // 瀏覽器是否支援
-```
 
-> **注意**：Ollama 目前不支援音訊多模態輸入，語音輸入功能使用瀏覽器的 Web Speech API 實現。
+// 音檔轉錄（faster-whisper）
+const isTranscribing = ref(false);             // 是否正在轉錄
+const audioInput = ref<HTMLInputElement>();    // 音檔輸入元素
+const whisperAvailable = ref(false);           // Whisper 服務是否可用
+```
 
 ## 訊息介面定義
 
@@ -311,7 +315,43 @@ function toggleSpeechRecognition() {
 }
 ```
 
-### 8. 編輯並重新發送訊息
+### 8. 音檔上傳轉錄（faster-whisper）
+
+```typescript
+async function handleAudioUpload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (!input.files || input.files.length === 0) return;
+  
+  const file = input.files[0];
+  isTranscribing.value = true;
+  
+  try {
+    const formData = new FormData();
+    formData.append('audio', file);
+    
+    const response = await fetch(`${API_BASE}/transcribe`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    const data = await response.json();
+    
+    if (data.text) {
+      // 將轉錄結果加入輸入框
+      userInput.value += data.text;
+      console.log(`轉錄完成: 語言=${data.language}, 時長=${data.duration}秒`);
+    }
+  } catch (error) {
+    if (error.message.includes('Whisper 服務未啟動')) {
+      alert('請先啟動 whisper-server');
+    }
+  } finally {
+    isTranscribing.value = false;
+  }
+}
+```
+
+### 9. 編輯並重新發送訊息
 
 ```typescript
 function editLastMessage() {

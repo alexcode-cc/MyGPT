@@ -3,8 +3,10 @@
 ## 技術棧
 
 - **Express.js** - Web 框架
-- **Axios** - HTTP 客戶端（用於與 Ollama 通訊）
+- **Axios** - HTTP 客戶端（用於與 Ollama 和 Whisper 服務通訊）
 - **CORS** - 跨域資源共享中間件
+- **Multer** - 檔案上傳處理
+- **form-data** - FormData 處理（轉發音檔到 Whisper 服務）
 
 ## 伺服器設定
 
@@ -12,17 +14,28 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const multer = require('multer');
+const FormData = require('form-data');
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // 支援大型圖片
 
 const OLLAMA_API = 'http://localhost:11434/api';
+const WHISPER_API = process.env.WHISPER_API || 'http://localhost:8001';
+
+// 檔案上傳設定
+const upload = multer({ 
+  dest: '/tmp/uploads/',
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+});
 
 const PORT = 3001;
 const HOST = '0.0.0.0';
 app.listen(PORT, HOST, () => {
   console.log(`Server running on http://${HOST}:${PORT}`);
+  console.log(`Whisper API: ${WHISPER_API}`);
 });
 ```
 
@@ -201,6 +214,62 @@ app.use(express.json());
 
 自動解析請求 body 中的 JSON 資料。
 
+## 3. 音檔轉錄 API (POST /api/transcribe)
+
+將音檔轉發到 faster-whisper 服務進行轉錄。
+
+```javascript
+app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: '未提供音訊檔案' });
+  }
+
+  const filePath = req.file.path;
+  const originalName = req.file.originalname;
+
+  try {
+    // 建立 FormData 轉發到 Whisper 服務
+    const formData = new FormData();
+    formData.append('audio', fs.createReadStream(filePath), {
+      filename: originalName,
+      contentType: req.file.mimetype
+    });
+    formData.append('task', 'transcribe');
+
+    const response = await axios.post(`${WHISPER_API}/transcribe`, formData, {
+      headers: { ...formData.getHeaders() },
+      timeout: 300000 // 5 分鐘超時
+    });
+
+    fs.unlinkSync(filePath); // 清理暫存檔案
+    res.json(response.data);
+  } catch (error) {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    
+    if (error.code === 'ECONNREFUSED') {
+      return res.status(503).json({ 
+        error: 'Whisper 服務未啟動',
+        suggestion: 'cd whisper-server && ./start.sh'
+      });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+```
+
+## 4. Whisper 服務狀態檢查
+
+```javascript
+app.get('/api/whisper/health', async (req, res) => {
+  try {
+    const response = await axios.get(`${WHISPER_API}/health`, { timeout: 5000 });
+    res.json({ available: true, ...response.data });
+  } catch (error) {
+    res.json({ available: false, error: error.message });
+  }
+});
+```
+
 ## 相依套件
 
 ```json
@@ -208,17 +277,57 @@ app.use(express.json());
   "dependencies": {
     "axios": "^1.6.7",
     "cors": "^2.8.5",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "form-data": "^4.0.0",
+    "multer": "^1.4.5-lts.1"
   }
 }
 ```
 
-## 關於音訊支援
+---
 
-> **注意**：Ollama 目前**不支援**音訊多模態輸入。
-> 
-> - `whisper` 和 `qwen2-audio` **不存在**於 Ollama 模型庫中
-> - `qwen3-vl` 是視覺語言模型，支援文字、圖片、影片，但**不支援音訊**
-> - 如需語音輸入功能，前端使用瀏覽器的 Web Speech API
-> 
-> 相關 Issue：[ollama/ollama#6367](https://github.com/ollama/ollama/issues/6367)
+## Faster-Whisper 服務
+
+### 簡介
+
+本專案整合獨立的 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) 服務處理音檔轉錄，
+因為 Ollama 不支援音訊多模態輸入（[Issue #6367](https://github.com/ollama/ollama/issues/6367)）。
+
+### 架構
+
+```
+瀏覽器 → Node.js (3001) → Python faster-whisper (8001)
+              ↓
+          Ollama (11434)
+```
+
+### 服務設定
+
+位於 `whisper-server/main.py`，使用 FastAPI 框架。
+
+**環境變數：**
+
+| 變數 | 預設值 | 說明 |
+|------|--------|------|
+| WHISPER_MODEL_SIZE | large-v3 | 模型大小 |
+| WHISPER_DEVICE | cuda | 運算裝置 |
+| WHISPER_COMPUTE_TYPE | float16 | 計算類型 |
+| WHISPER_PORT | 8001 | 服務埠號 |
+
+### 可用模型
+
+| 模型 | 參數量 | VRAM |
+|------|--------|------|
+| tiny | 39M | ~1GB |
+| base | 74M | ~1GB |
+| small | 244M | ~2GB |
+| medium | 769M | ~5GB |
+| large-v3 | 1550M | ~10GB |
+| turbo | 809M | ~6GB |
+
+### 啟動服務
+
+```bash
+cd whisper-server
+./start.sh
+```

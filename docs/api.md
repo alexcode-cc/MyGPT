@@ -3,7 +3,7 @@
 ## 基本資訊
 
 - **Base URL**: `http://localhost:3001/api`
-- **內容類型**: `application/json`
+- **內容類型**: `application/json`（除音檔上傳外）
 
 ## 端點列表
 
@@ -11,6 +11,9 @@
 |------|------|------|
 | GET | `/api/models` | 取得可用模型列表 |
 | POST | `/api/chat` | 發送聊天訊息（支援圖片多模態） |
+| POST | `/api/transcribe` | 音檔轉文字（使用 faster-whisper） |
+| GET | `/api/whisper/health` | 檢查 Whisper 服務狀態 |
+| GET | `/api/whisper/models` | 取得 Whisper 模型資訊 |
 
 ---
 
@@ -271,21 +274,111 @@ curl -X POST http://localhost:3001/api/chat \
 
 ---
 
+## POST /api/transcribe
+
+上傳音檔並轉換為文字（使用 faster-whisper）。
+
+### 請求
+
+- **Content-Type**: `multipart/form-data`
+
+| 欄位 | 類型 | 必填 | 說明 |
+|------|------|------|------|
+| `audio` | file | 是 | 音訊檔案（MP3、WAV、M4A、FLAC、OGG 等） |
+| `language` | string | 否 | 語言代碼（如 'zh', 'en', 'ja'），不指定則自動偵測 |
+
+### 回應
+
+```json
+{
+  "text": "轉錄的完整文字內容",
+  "language": "zh",
+  "language_probability": 0.987,
+  "duration": 125.5,
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 3.5,
+      "text": "第一段文字"
+    }
+  ]
+}
+```
+
+### 錯誤回應
+
+```json
+{
+  "error": "Whisper 服務未啟動",
+  "detail": "請先啟動 whisper-server 服務",
+  "suggestion": "cd whisper-server && ./start.sh"
+}
+```
+
+### cURL 範例
+
+```bash
+curl -X POST http://localhost:3001/api/transcribe \
+  -F "audio=@recording.mp3"
+```
+
+---
+
+## GET /api/whisper/health
+
+檢查 faster-whisper 服務狀態。
+
+### 回應
+
+```json
+{
+  "available": true,
+  "status": "healthy",
+  "model_loaded": true
+}
+```
+
+---
+
+## GET /api/whisper/models
+
+取得 Whisper 可用模型資訊。
+
+### 回應
+
+```json
+{
+  "available_models": [
+    {"name": "tiny", "parameters": "39M", "vram": "~1GB"},
+    {"name": "large-v3", "parameters": "1550M", "vram": "~10GB"}
+  ],
+  "current_model": "large-v3",
+  "device": "cuda",
+  "compute_type": "float16"
+}
+```
+
+---
+
 ## 狀態碼
 
 | 狀態碼 | 說明 |
 |--------|------|
 | 200 | 成功 |
+| 400 | 請求錯誤（如未提供音檔） |
 | 500 | 伺服器錯誤（Ollama 服務問題、模型不存在等） |
+| 503 | 服務不可用（Whisper 服務未啟動） |
 
 ---
 
-## 關於音訊支援
+## 音訊支援說明
 
-> **注意**：Ollama 目前**不支援**音訊多模態輸入。
-> 
-> - `whisper` 和 `qwen2-audio` **不存在**於 Ollama 模型庫中
-> - `qwen3-vl` 是視覺語言模型，支援**文字、圖片、影片**，但**不支援音訊**
-> - 如需語音輸入，請使用前端的 🎤 按鈕（瀏覽器 Web Speech API）
-> 
-> 相關 Issue：[ollama/ollama#6367](https://github.com/ollama/ollama/issues/6367)
+Ollama 不支援音訊多模態輸入（[Issue #6367](https://github.com/ollama/ollama/issues/6367)），
+因此本專案整合獨立的 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) 服務處理音檔轉錄。
+
+語音輸入的兩種方式：
+
+| 功能 | 按鈕 | 技術 | 說明 |
+|------|------|------|------|
+| 即時語音 | 🎤 | Web Speech API | 瀏覽器原生，無需後端 |
+| 音檔轉錄 | 📁 | faster-whisper | 高品質，支援多種格式 |

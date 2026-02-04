@@ -20,6 +20,7 @@
 ### 多模態支援
 - **圖片上傳** 📷 - 支援視覺模型（如 qwen3-vl）分析圖片
 - **語音輸入** 🎤 - 瀏覽器即時語音轉文字（Web Speech API）
+- **音檔轉錄** 📁 - 使用 faster-whisper 轉錄音檔為文字
 
 ### 訊息編輯
 - 編輯最後一則訊息並重新發送
@@ -45,6 +46,10 @@ ollama pull qwen2.5:7b
 
 ```
 chatbot/
+├── whisper-server/   # Faster-Whisper 語音轉錄服務
+│   ├── main.py       # FastAPI 服務
+│   ├── requirements.txt
+│   └── start.sh      # 啟動腳本
 ├── server/           # 後端 API 服務
 │   ├── app.js        # Express 伺服器
 │   └── package.json
@@ -73,6 +78,12 @@ npm install
 cd server
 npm install
 cd ..
+
+# 安裝 Whisper 服務依賴（可選，用於音檔轉錄）
+cd whisper-server
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
 ```
 
 ### 2. 啟動 Ollama 服務
@@ -93,7 +104,18 @@ npm start
 
 後端將在 `http://localhost:3001` 運行。
 
-### 4. 啟動前端開發伺服器
+### 4. 啟動 Whisper 服務（可選）
+
+如需音檔轉錄功能，開啟新的終端：
+
+```bash
+cd whisper-server
+./start.sh
+```
+
+Whisper 服務將在 `http://localhost:8001` 運行。
+
+### 5. 啟動前端開發伺服器
 
 開啟新的終端：
 
@@ -113,6 +135,9 @@ npm run dev
 |------|------|------|
 | GET | `/api/models` | 取得可用模型列表 |
 | POST | `/api/chat` | 發送聊天訊息（支援圖片多模態） |
+| POST | `/api/transcribe` | 音檔轉文字（轉發到 faster-whisper） |
+| GET | `/api/whisper/health` | 檢查 Whisper 服務狀態 |
+| GET | `/api/whisper/models` | 取得 Whisper 模型資訊 |
 
 ### 聊天 API 請求範例
 
@@ -158,9 +183,27 @@ npm start
 - 無需安裝額外模型
 - 語音會即時轉為文字顯示在輸入框
 
-> **關於音訊支援**：Ollama 目前**不支援**音訊多模態輸入（[Issue #6367](https://github.com/ollama/ollama/issues/6367)）。
-> `qwen3-vl` 是視覺語言模型，支援文字、圖片、影片，但**不支援音訊**。
-> 如需語音輸入，請使用 🎤 按鈕的即時語音功能（瀏覽器 Web Speech API）。
+### 音檔轉錄 📁
+點擊 📁 按鈕上傳音檔，使用 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) 進行高品質轉錄：
+- 支援 MP3、WAV、M4A、FLAC、OGG 等格式
+- 自動偵測語言
+- 需要啟動 whisper-server 服務（見下方說明）
+
+**啟動 Whisper 服務：**
+```bash
+cd whisper-server
+./start.sh
+```
+
+**環境變數設定（可選）：**
+| 變數 | 預設值 | 說明 |
+|------|--------|------|
+| WHISPER_MODEL_SIZE | large-v3 | 模型大小（tiny/base/small/medium/large-v3/turbo） |
+| WHISPER_DEVICE | cuda | 運算裝置（cuda/cpu） |
+| WHISPER_COMPUTE_TYPE | float16 | 計算類型（float16/int8） |
+| WHISPER_PORT | 8001 | 服務埠號 |
+
+> **注意**：Ollama 不支援音訊多模態輸入，因此本專案整合獨立的 faster-whisper 服務處理音檔轉錄。
 
 ## 授權
 
